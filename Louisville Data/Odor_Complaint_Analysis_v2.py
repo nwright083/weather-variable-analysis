@@ -596,7 +596,7 @@ def get_wind_sector(degree):
 
 df_zipcode['wind_sector'] = df_zipcode['wind_direction'].apply(get_wind_sector)
 
-fig, axes = plt.subplots(len(top_3_zips), 1, figsize=(12, 4 * len(top_3_zips)), sharex=True)
+fig, axes = plt.subplots(len(top_3_zips), 1, figsize=(12, 4 * len(top_3_zips)), sharex=False)
 if len(top_3_zips) == 1:
     axes = [axes]
 
