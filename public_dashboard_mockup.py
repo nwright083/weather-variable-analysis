@@ -58,10 +58,10 @@ EVENT_FREQ_PCT  = [0.3, 1.9, 5.2, 8.8, 14.9, 20.8, 35.7, 47.4, 67.2, 85.1]
 
 # Mock example days for each tier
 EXAMPLE_DAYS = {
-    'Clear / Low Risk':  {'date': 'Jun 11, 2019', 'ori': 1,   'complaints': 18, 'temp': 61, 'wind': 7.7,  'blh': 'Normal', 'dtr': 'High'},
-    'Moderate Risk':     {'date': 'Feb 07, 2018', 'ori': 9,   'complaints': 4,  'temp': 26, 'wind': 7.3,  'blh': 'Low',    'dtr': 'Normal'},
-    'Elevated Risk':     {'date': 'Jun 03, 2020', 'ori': 31,  'complaints': 17, 'temp': 73, 'wind': 10.2, 'blh': 'Normal', 'dtr': 'High'},
-    'High Risk':         {'date': 'Oct 12, 2022', 'ori': 75,  'complaints': 108, 'temp': 59, 'wind': 8.6,  'blh': 'Low',    'dtr': 'High'},
+    'Clear / Low Risk':  {'date': 'Jan 25, 2018', 'ori': 2,   'complaints': 5,  'temp': 27, 'wind': 5.1,  'blh': 'Normal', 'dtr': 'Normal'},
+    'Moderate Risk':     {'date': 'Mar 26, 2018', 'ori': 9,   'complaints': 15, 'temp': 37, 'wind': 9.4,  'blh': 'Normal', 'dtr': 'High'},
+    'Elevated Risk':     {'date': 'May 28, 2018', 'ori': 35,  'complaints': 44, 'temp': 75, 'wind': 2.8,  'blh': 'Low',    'dtr': 'High'},
+    'High Risk':         {'date': 'May 01, 2018', 'ori': 92,  'complaints': 104, 'temp': 58, 'wind': 6.6,  'blh': 'Low',    'dtr': 'High'},
 }
 
 # ──────────────────────────────────────────────────────────────────────────────

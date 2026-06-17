@@ -131,6 +131,59 @@ daily_df.columns = [
 # Calculate Diurnal Temperature Range (DTR)
 daily_df['diurnal_temperature_range'] = daily_df['temp_max'] - daily_df['temp_min']
 
+# === Temporal Variable Engineering ===
+# Create date_dt early for temporal feature extraction
+daily_df['date_dt'] = pd.to_datetime(daily_df['date'])
+daily_df['dayofweek'] = daily_df['date_dt'].dt.dayofweek  # 0=Monday, 6=Sunday
+daily_df['month'] = daily_df['date_dt'].dt.month
+
+# Season mapping (meteorological seasons)
+season_map = {12: 'Winter', 1: 'Winter', 2: 'Winter',
+              3: 'Spring', 4: 'Spring', 5: 'Spring',
+              6: 'Summer', 7: 'Summer', 8: 'Summer',
+              9: 'Fall', 10: 'Fall', 11: 'Fall'}
+daily_df['season'] = daily_df['month'].map(season_map)
+
+# US Federal Holidays
+try:
+    import holidays as holidays_lib
+    us_holidays = holidays_lib.US()
+    daily_df['is_holiday'] = daily_df['date_dt'].apply(lambda x: 1 if x in us_holidays else 0)
+except ImportError:
+    print("Note: 'holidays' package not installed. Using manual US federal holiday approximation.")
+    def _is_approx_holiday(dt):
+        m, d = dt.month, dt.day
+        # Fixed-date holidays
+        if (m, d) in [(1, 1), (7, 4), (11, 11), (12, 25)]:
+            return 1
+        # Floating holidays (Monday-anchored)
+        if m == 1 and 15 <= d <= 21 and dt.weekday() == 0:   # MLK Day (3rd Monday Jan)
+            return 1
+        if m == 2 and 15 <= d <= 21 and dt.weekday() == 0:   # Presidents Day (3rd Monday Feb)
+            return 1
+        if m == 5 and 25 <= d <= 31 and dt.weekday() == 0:   # Memorial Day (last Monday May)
+            return 1
+        if m == 9 and 1 <= d <= 7 and dt.weekday() == 0:     # Labor Day (1st Monday Sep)
+            return 1
+        if m == 10 and 8 <= d <= 14 and dt.weekday() == 0:   # Columbus Day (2nd Monday Oct)
+            return 1
+        if m == 11 and 22 <= d <= 28 and dt.weekday() == 3:  # Thanksgiving (4th Thursday Nov)
+            return 1
+        return 0
+    daily_df['is_holiday'] = daily_df['date_dt'].apply(_is_approx_holiday)
+
+print(f"Holiday days in dataset: {daily_df['is_holiday'].sum()} / {len(daily_df)} ({daily_df['is_holiday'].mean()*100:.1f}%)")
+
+# Day-of-week dummy variables (Monday = reference category, omitted)
+for i, day_name in enumerate(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']):
+    daily_df[f'dow_{day_name}'] = (daily_df['dayofweek'] == i).astype(int)
+
+# Season dummy variables (Winter = reference category, omitted)
+for s in ['Spring', 'Summer', 'Fall']:
+    daily_df[f'season_{s.lower()}'] = (daily_df['season'] == s).astype(int)
+
+print(f"Temporal features added: dayofweek, month, season, is_holiday, 6 DOW dummies, 3 season dummies")
+
 # Load smell reports to filter for severity >= 3
 smell_file_path = 'smell_reports_pittsburgh.csv'
 if not os.path.exists(smell_file_path) and os.path.exists(os.path.join('Pittsburgh Data', smell_file_path)):
@@ -220,6 +273,173 @@ axes[1].set_ylabel('Average Odor Complaints')
 
 plt.tight_layout()
 plt.show()
+
+
+# ==========================================
+
+# Section 3b: Temporal Pattern Characterization
+# Analyzes how day-of-week, month, season, and holidays relate to odor complaint patterns.
+# These exploratory plots characterize the temporal structure before incorporating it into models.
+
+from scipy.stats import mannwhitneyu
+
+# --- Plot 3b.1: Day-of-Week Complaint & High-Severity Profile ---
+fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+
+day_labels = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']
+dow_complaints = daily_df.groupby('dayofweek')['complaints'].mean()
+dow_high = daily_df.groupby('dayofweek')['high_complaints'].mean()
+weekday_colors = ['#2196F3' if d < 5 else '#FF5722' for d in range(7)]
+
+axes[0].bar(range(7), dow_complaints.values, color=weekday_colors)
+axes[0].set_xticks(range(7))
+axes[0].set_xticklabels(day_labels)
+axes[0].set_title('Average Daily Odor Complaints by Day of Week')
+axes[0].set_ylabel('Average Daily Complaints')
+axes[0].set_xlabel('Day of Week')
+for i, v in enumerate(dow_complaints.values):
+    axes[0].text(i, v + 0.3, f'{v:.1f}', ha='center', fontsize=9)
+
+axes[1].bar(range(7), dow_high.values, color=weekday_colors)
+axes[1].set_xticks(range(7))
+axes[1].set_xticklabels(day_labels)
+axes[1].set_title('Average Daily High-Severity Reports (≥3) by Day of Week')
+axes[1].set_ylabel('Average Daily High-Severity Reports')
+axes[1].set_xlabel('Day of Week')
+for i, v in enumerate(dow_high.values):
+    axes[1].text(i, v + 0.1, f'{v:.1f}', ha='center', fontsize=9)
+
+plt.suptitle('Section 3b: Day-of-Week Complaint Profile', fontsize=14, fontweight='bold')
+plt.tight_layout()
+plt.show()
+
+
+# --- Plot 3b.2: Monthly & Seasonal Complaint Patterns ---
+fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+
+month_labels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+season_colors = {'Winter': '#2196F3', 'Spring': '#4CAF50', 'Summer': '#FF9800', 'Fall': '#9C27B0'}
+month_to_season = {1: 'Winter', 2: 'Winter', 3: 'Spring', 4: 'Spring', 5: 'Spring', 6: 'Summer',
+                   7: 'Summer', 8: 'Summer', 9: 'Fall', 10: 'Fall', 11: 'Fall', 12: 'Winter'}
+bar_colors_month = [season_colors[month_to_season[m]] for m in range(1, 13)]
+
+monthly_complaints = daily_df.groupby('month')['complaints'].mean()
+axes[0].bar(range(1, 13), monthly_complaints.values, color=bar_colors_month)
+axes[0].set_xticks(range(1, 13))
+axes[0].set_xticklabels(month_labels)
+axes[0].set_title('Average Daily Odor Complaints by Month')
+axes[0].set_ylabel('Average Daily Complaints')
+axes[0].set_xlabel('Month')
+
+# Seasonal grouped bar chart
+season_order = ['Winter', 'Spring', 'Summer', 'Fall']
+season_stats = daily_df.groupby('season').agg(
+    avg_complaints=('complaints', 'mean'),
+    avg_high=('high_complaints', 'mean'),
+    num_days=('complaints', 'count')
+).reindex(season_order)
+
+x_season = np.arange(len(season_order))
+width = 0.35
+axes[1].bar(x_season - width/2, season_stats['avg_complaints'], width, label='All Complaints',
+            color=[season_colors[s] for s in season_order], alpha=0.85)
+axes[1].bar(x_season + width/2, season_stats['avg_high'], width, label='High Severity (≥3)',
+            color=[season_colors[s] for s in season_order], alpha=0.4, edgecolor='black')
+axes[1].set_xticks(x_season)
+axes[1].set_xticklabels([f'{s}\n(N={season_stats.loc[s, "num_days"]})' for s in season_order])
+axes[1].set_title('Average Daily Complaints by Season')
+axes[1].set_ylabel('Average Daily Complaints')
+axes[1].legend(fontsize=10)
+
+plt.suptitle('Section 3b: Monthly & Seasonal Complaint Patterns', fontsize=14, fontweight='bold')
+plt.tight_layout()
+plt.show()
+
+
+# --- Plot 3b.3: Holiday vs Non-Holiday Comparison ---
+fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+
+holiday_complaints = daily_df[daily_df['is_holiday'] == 1]['complaints']
+nonholiday_complaints = daily_df[daily_df['is_holiday'] == 0]['complaints']
+
+# Mann-Whitney U test for statistical significance
+mw_stat, mw_pval = mannwhitneyu(holiday_complaints, nonholiday_complaints, alternative='two-sided')
+
+# Panel 1: Average complaints
+means_hol = [nonholiday_complaints.mean(), holiday_complaints.mean()]
+axes[0].bar(['Non-Holiday', 'Holiday'], means_hol, color=['#2196F3', '#FF5722'])
+axes[0].set_title(f'Avg Daily Complaints\n(Mann-Whitney p={mw_pval:.4f})')
+axes[0].set_ylabel('Average Daily Complaints')
+for i, v in enumerate(means_hol):
+    axes[0].text(i, v + 0.3, f'{v:.1f}', ha='center', fontsize=11, fontweight='bold')
+
+# Panel 2: High severity reports
+holiday_high = daily_df[daily_df['is_holiday'] == 1]['high_complaints'].mean()
+nonholiday_high = daily_df[daily_df['is_holiday'] == 0]['high_complaints'].mean()
+axes[1].bar(['Non-Holiday', 'Holiday'], [nonholiday_high, holiday_high], color=['#2196F3', '#FF5722'])
+axes[1].set_title('Avg Daily High-Severity Reports (≥3)')
+axes[1].set_ylabel('Average Daily High-Severity Reports')
+for i, v in enumerate([nonholiday_high, holiday_high]):
+    axes[1].text(i, v + 0.1, f'{v:.1f}', ha='center', fontsize=11, fontweight='bold')
+
+# Panel 3: Average severity on active days
+holiday_sev = daily_df[(daily_df['is_holiday'] == 1) & (daily_df['complaints'] > 0)]['smell_value_average']
+nonholiday_sev = daily_df[(daily_df['is_holiday'] == 0) & (daily_df['complaints'] > 0)]['smell_value_average']
+sev_vals = [nonholiday_sev.mean(), holiday_sev.mean() if len(holiday_sev) > 0 else 0]
+axes[2].bar(['Non-Holiday', 'Holiday'], sev_vals, color=['#2196F3', '#FF5722'])
+axes[2].set_title('Avg Smell Severity on Active Days (1-5)')
+axes[2].set_ylabel('Average Smell Severity')
+for i, v in enumerate(sev_vals):
+    axes[2].text(i, v + 0.02, f'{v:.2f}', ha='center', fontsize=11, fontweight='bold')
+
+plt.suptitle(f'Section 3b: Holiday Effect (N_holiday={len(holiday_complaints)}, N_non-holiday={len(nonholiday_complaints)})',
+             fontsize=13, fontweight='bold')
+plt.tight_layout()
+plt.show()
+
+
+# --- Table 3b: Point-Biserial Correlations for Temporal Variables ---
+print("\n=== Point-Biserial Correlations: Temporal Variables vs Daily Complaints ===")
+print("(Pearson r between binary/categorical dummy and daily complaint count)")
+print("Positive r = more complaints when variable = 1; Negative r = fewer complaints\n")
+
+temporal_corr_vars = ['is_weekend', 'is_holiday',
+                      'dow_tue', 'dow_wed', 'dow_thu', 'dow_fri', 'dow_sat', 'dow_sun',
+                      'season_spring', 'season_summer', 'season_fall']
+
+temporal_corr_labels = {
+    'is_weekend': 'Is Weekend (Sat/Sun)',
+    'is_holiday': 'Is Federal Holiday',
+    'dow_tue': 'Tuesday (vs Monday)',
+    'dow_wed': 'Wednesday (vs Monday)',
+    'dow_thu': 'Thursday (vs Monday)',
+    'dow_fri': 'Friday (vs Monday)',
+    'dow_sat': 'Saturday (vs Monday)',
+    'dow_sun': 'Sunday (vs Monday)',
+    'season_spring': 'Spring (vs Winter)',
+    'season_summer': 'Summer (vs Winter)',
+    'season_fall': 'Fall (vs Winter)'
+}
+
+pb_results = []
+for var in temporal_corr_vars:
+    if var in daily_df.columns:
+        clean = daily_df[['complaints', var]].dropna()
+        if len(clean) >= 3 and clean[var].std() > 0:
+            r, p = pearsonr(clean['complaints'], clean[var])
+        else:
+            r, p = np.nan, np.nan
+        pb_results.append({
+            'Variable': temporal_corr_labels.get(var, var),
+            'r (point-biserial)': round(r, 4),
+            'p-value': f'{p:.2e}' if not np.isnan(p) else 'NaN',
+            'N': len(clean)
+        })
+
+pb_table = pd.DataFrame(pb_results)
+print(pb_table.to_string(index=False))
+print()
 
 # ==========================================
 
@@ -664,33 +884,70 @@ print(df_piecewise.round(3))
 # ==========================================
 
 # Plot piecewise regressions for Temperature with 5-degree binning and 50°F split
-fig, axes = plt.subplots(1, 2, figsize=(16, 5))
+# Row 1: Daily Average Temperature, Row 2: Daily Maximum Temperature
+fig, axes = plt.subplots(2, 2, figsize=(16, 11), sharey='row')
 
-# Calculate binned daily average rates for cool days
+# --- Row 1: Daily Average Temperature ---
+# Calculate binned daily average rates for cool days (Mean Temp <= 50°F)
 binned_cool = df_cool.groupby('temperature_binned').agg(
     avg_complaints=('complaints', 'mean'),
     num_days=('complaints', 'count')
 ).reset_index()
 binned_cool = binned_cool[binned_cool['num_days'] >= 1]
 
-sns.regplot(x='temperature_binned', y='avg_complaints', data=binned_cool, ax=axes[0], color='darkblue', 
+sns.regplot(x='temperature_binned', y='avg_complaints', data=binned_cool, ax=axes[0, 0], color='darkblue', 
             scatter_kws={'alpha': 0.7, 's': 50, 'edgecolor': 'k'})
-axes[0].set_title('Odor Complaints vs Temperature (<= 50°F, 5-Degree Binned)')
-axes[0].set_xlabel('Temperature (°F) (5-Degree Binned)')
-axes[0].set_ylabel('Average Daily Odor Complaints')
+axes[0, 0].set_title('Odor Complaints vs Daily Average Temp (<= 50°F, 5-Degree Binned)')
+axes[0, 0].set_xlabel('Daily Average Temperature (°F) (5-Degree Binned)')
+axes[0, 0].set_ylabel('Average Daily Odor Complaints')
 
-# Calculate binned daily average rates for hot days
+# Calculate binned daily average rates for hot days (Mean Temp > 50°F)
 binned_hot = df_hot.groupby('temperature_binned').agg(
     avg_complaints=('complaints', 'mean'),
     num_days=('complaints', 'count')
 ).reset_index()
 binned_hot = binned_hot[binned_hot['num_days'] >= 1]
 
-sns.regplot(x='temperature_binned', y='avg_complaints', data=binned_hot, ax=axes[1], color='darkred', 
+sns.regplot(x='temperature_binned', y='avg_complaints', data=binned_hot, ax=axes[0, 1], color='darkred', 
             scatter_kws={'alpha': 0.7, 's': 50, 'edgecolor': 'k'})
-axes[1].set_title('Odor Complaints vs Temperature (> 50°F, 5-Degree Binned)')
-axes[1].set_xlabel('Temperature (°F) (5-Degree Binned)')
-axes[1].set_ylabel('Average Daily Odor Complaints')
+axes[0, 1].set_title('Odor Complaints vs Daily Average Temp (> 50°F, 5-Degree Binned)')
+axes[0, 1].set_xlabel('Daily Average Temperature (°F) (5-Degree Binned)')
+axes[0, 1].set_ylabel('Average Daily Odor Complaints')
+
+
+# --- Row 2: Daily Maximum Temperature ---
+# We bin maximum daily temperature in the same way (5-degree bins)
+daily_df['temp_max_binned'] = (daily_df['temp_max'] / 5).round() * 5
+
+# Split by max temperature (<= 50°F vs > 50°F)
+df_max_cool = daily_df[daily_df['temp_max'] <= 50].copy()
+df_max_hot = daily_df[daily_df['temp_max'] > 50].copy()
+
+# Calculate binned daily max rates for cool days (Max Temp <= 50°F)
+binned_max_cool = df_max_cool.groupby('temp_max_binned').agg(
+    avg_complaints=('complaints', 'mean'),
+    num_days=('complaints', 'count')
+).reset_index()
+binned_max_cool = binned_max_cool[binned_max_cool['num_days'] >= 1]
+
+sns.regplot(x='temp_max_binned', y='avg_complaints', data=binned_max_cool, ax=axes[1, 0], color='blue', 
+            scatter_kws={'alpha': 0.7, 's': 50, 'edgecolor': 'k'})
+axes[1, 0].set_title('Odor Complaints vs Daily Max Temp (<= 50°F, 5-Degree Binned)')
+axes[1, 0].set_xlabel('Daily Maximum Temperature (°F) (5-Degree Binned)')
+axes[1, 0].set_ylabel('Average Daily Odor Complaints')
+
+# Calculate binned daily max rates for hot days (Max Temp > 50°F)
+binned_max_hot = df_max_hot.groupby('temp_max_binned').agg(
+    avg_complaints=('complaints', 'mean'),
+    num_days=('complaints', 'count')
+).reset_index()
+binned_max_hot = binned_max_hot[binned_max_hot['num_days'] >= 1]
+
+sns.regplot(x='temp_max_binned', y='avg_complaints', data=binned_max_hot, ax=axes[1, 1], color='red', 
+            scatter_kws={'alpha': 0.7, 's': 50, 'edgecolor': 'k'})
+axes[1, 1].set_title('Odor Complaints vs Daily Max Temp (> 50°F, 5-Degree Binned)')
+axes[1, 1].set_xlabel('Daily Maximum Temperature (°F) (5-Degree Binned)')
+axes[1, 1].set_ylabel('Average Daily Odor Complaints')
 
 plt.tight_layout()
 plt.show()
@@ -700,13 +957,16 @@ plt.show()
 
 import statsmodels.api as sm
 
-# Selected variables for modeling (including is_weekend to control for weekly reporting shifts)
+# Selected variables for modeling
+# Replaces binary is_weekend with categorical day-of-week dummies (Monday = reference)
+# and a federal holiday indicator to better capture industrial schedule variation.
 model_vars = ['temperature', 'temperature_squared', 'solar_radiation', 'relative_humidity', 
               'wind_speed', 'precipitation', 'diurnal_temperature_range', 
-              'boundary_layer_height', 'atmospheric_pressure', 'is_weekend']
+              'boundary_layer_height', 'atmospheric_pressure',
+              'dow_tue', 'dow_wed', 'dow_thu', 'dow_fri', 'dow_sat', 'dow_sun',
+              'is_holiday']
 
 daily_df['temperature_squared'] = daily_df['temperature'] ** 2
-daily_df['is_weekend'] = daily_df['is_weekend'].astype(int)
 
 # Clean data for count models
 binned_cols = [c for c in daily_df.columns if c.endswith('_binned')]
@@ -838,6 +1098,7 @@ print("======================================================")
 temp_range = np.linspace(daily_df['temperature'].min(), daily_df['temperature'].max(), 200)
 
 # Create a prediction dataframe holding other variables at their mean
+# Day-of-week dummies all set to 0 = Monday baseline, is_holiday = 0 (non-holiday)
 pred_df = pd.DataFrame({
     'const': 1.0,
     'temperature': temp_range,
@@ -849,14 +1110,16 @@ pred_df = pd.DataFrame({
     'diurnal_temperature_range': daily_df['diurnal_temperature_range'].mean(),
     'boundary_layer_height': daily_df['boundary_layer_height'].mean(),
     'atmospheric_pressure': daily_df['atmospheric_pressure'].mean(),
-    'is_weekend': 0.0 # Holding weekend at 0 (weekday baseline) for the curve
+    'dow_tue': 0.0, 'dow_wed': 0.0, 'dow_thu': 0.0,
+    'dow_fri': 0.0, 'dow_sat': 0.0, 'dow_sun': 0.0,
+    'is_holiday': 0.0
 })
 
 # Predict probabilities
 pred_probs = logit_res.predict(pred_df)
 
 plt.figure(figsize=(10, 6))
-plt.plot(temp_range, pred_probs, color='darkorange', linewidth=3, label='Predicted Probability (Weekday)')
+plt.plot(temp_range, pred_probs, color='darkorange', linewidth=3, label='Predicted Probability (Monday Baseline)')
 
 # Add actual scatter points (binned by temperature equal-width bins)
 # Bin temperature into 10 equal-width bins across the observed range to show the U-shape curve cleanly
@@ -890,13 +1153,15 @@ pred_df_blh = pd.DataFrame({
     'diurnal_temperature_range': daily_df['diurnal_temperature_range'].mean(),
     'boundary_layer_height': blh_range,
     'atmospheric_pressure': daily_df['atmospheric_pressure'].mean(),
-    'is_weekend': 0.0
+    'dow_tue': 0.0, 'dow_wed': 0.0, 'dow_thu': 0.0,
+    'dow_fri': 0.0, 'dow_sat': 0.0, 'dow_sun': 0.0,
+    'is_holiday': 0.0
 })
 
 pred_probs_blh = logit_res.predict(pred_df_blh)
 
 plt.figure(figsize=(10, 6))
-plt.plot(blh_range, pred_probs_blh, color='teal', linewidth=3, label='Predicted Probability (Weekday)')
+plt.plot(blh_range, pred_probs_blh, color='teal', linewidth=3, label='Predicted Probability (Monday Baseline)')
 
 # Add actual scatter points (binned by boundary layer height, equal-width bins)
 valid_blh_df = daily_df.dropna(subset=['boundary_layer_height']).copy()

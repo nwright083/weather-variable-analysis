@@ -309,9 +309,40 @@ This document serves as a comprehensive, presentation-ready guide to the spatiot
 
 | Decision Threshold | TN | FP | FN | TP | Accuracy | Precision | Recall | F1-Score |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **50.0% Threshold (Default)** | 2,011 | 184 | 366 | 519 | 82.14% | 73.83% | 58.64% | 0.6537 |
-| **34.3% Threshold (Optimal)** | 1,797 | 398 | 205 | 680 | 80.42% | 63.08% | 76.84% | 0.6928 |
-| **28.7% Threshold (Base-Rate)** | 1,699 | 496 | 163 | 722 | 78.60% | 59.28% | 81.58% | 0.6866 |"""
+| **28.7% Threshold (Base-Rate)** | 1,699 | 496 | 163 | 722 | 78.60% | 59.28% | 81.58% | 0.6866 |
+
+---
+
+## SECTION 9: Meteorological Odor Risk Index (Normalized) — Reporting Bias De-biasing
+
+To resolve human reporting cycles (such as weekend drop-offs, sleeping patterns, and holiday dips) that distort pure weather-based risk predictions, a separate de-biased modeling pipeline was created.
+
+### 9.1 Concept and Methodology
+1. **Odor Complaint Forecast:** This is the standard raw model that includes temporal controls (day-of-week and holiday variables) to predict the actual number of complaints submitted by the public. This is useful for city administrative planning.
+2. **Meteorological Odor Risk Index (Normalized):** This model trains with temporal controls but **neutralizes** them during prediction. All day-of-week dummy variables (`dow_tue` through `dow_sun`) and `is_holiday` are set to `0.0` (which mathematically defaults the model to a Monday, non-holiday baseline). This isolates the purely meteorological risk of odor traps, assuming industrial emitters run continuously 24/7/365.
+
+### 9.2 Comparative Results
+
+When we evaluate the normalized index against the raw reported complaints, we see a rise in sensitivity (Recall) because the model no longer discounts high-risk weather patterns just because they occur on a weekend or holiday:
+
+#### Pittsburgh Models (Logit at 50% Threshold)
+* **Odor Complaint Forecast:** Recall = **57.98%**, Precision = **73.72%**
+* **Meteorological Odor Risk Index (Normalized):** Recall = **59.70%**, Precision = **72.12%**
+* **Overall Discrimination (ROC-AUC):** Both models exhibit excellent discriminative power at **0.8736**.
+
+#### Louisville Models (Logit at 50% Threshold)
+* **Odor Complaint Forecast:** Recall = **20.72%**, Precision = **33.33%**
+* **Meteorological Odor Risk Index (Normalized):** Recall = **23.40%**, Precision = **31.88%**
+
+> [!NOTE]
+> The slight drop in Precision is a mathematical artifact of the raw validation data: the normalized index correctly flags high-risk weather on a weekend, but because residents report less on weekends, the prediction is falsely counted as a false positive. This is the desired behavior for an early-warning public health system.
+
+### 9.3 Cloned Code and Notebooks:
+* **Pittsburgh De-biased Notebook:** [Odor_Complaint_Analysis_v2_debiased.ipynb](file:///Users/nawrig04/weather-varaible-analysis/Pittsburgh%20Data/Odor_Complaint_Analysis_v2_debiased.ipynb)
+* **Louisville De-biased Notebook:** [Odor_Complaint_Analysis_v2_debiased.ipynb](file:///Users/nawrig04/weather-varaible-analysis/Louisville%20Data/Odor_Complaint_Analysis_v2_debiased.ipynb)
+* **Pittsburgh De-biased Script:** [Odor_Complaint_Analysis_v2_debiased.py](file:///Users/nawrig04/weather-varaible-analysis/Pittsburgh%20Data/Odor_Complaint_Analysis_v2_debiased.py)
+* **Louisville De-biased Script:** [Odor_Complaint_Analysis_v2_debiased.py](file:///Users/nawrig04/weather-varaible-analysis/Louisville%20Data/Odor_Complaint_Analysis_v2_debiased.py)
+"""
 
 with open(md_path, 'w') as f:
     f.write(md_content)

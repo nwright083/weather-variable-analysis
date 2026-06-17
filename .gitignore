@@ -12,3 +12,4 @@ __pycache__/
 
 # Large weather dataset files (exceeding GitHub file limit of 100MB)
 *open-meteo-*.csv
+scratch/
