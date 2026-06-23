@@ -78,7 +78,7 @@ def build_meta():
         },
         "custom_slider_ranges": custom_ranges,
         "wind_defaults": {"filter": True, "penalty_pct": 75, "boost": 1.0},
-        "distance_defaults": {"enabled": True, "rate": 0.03},
+        "distance_defaults": {"enabled": True, "rate": 0.02},
     }
 
 
