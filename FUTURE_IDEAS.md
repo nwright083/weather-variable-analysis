@@ -17,13 +17,107 @@
 
 ---
 
+### 2. Translucent ZIP-based Spatial Mapping & Wind Corridor Corrections — Completed 2026-06-23
+**Scope:** Calvert City Odor Forecaster (`calvert_odor_forecaster.py`)
+- Replaced point markers with colored, translucent ZIP code boundaries (`calvert_zips.geojson`) via Pydeck `GeoJsonLayer` to visualize regional risk.
+- Fixed a 180-degree phase error in wind direction corridor transport logic (incoming wind must blow FROM the opposite of the source-to-receiver bearing).
+- Parameterized the forecast cache key to prevent stale location mismatch issues.
+- Added SQLite schema inspection and automatic database rebuilds on schema changes to prevent start crashes.
+- Resolved Matplotlib polar rose ticks warnings and Streamlit container width deprecation logs.
+
+---
+
+### 3. Extended 16-Day Forecast Outlook & 30-Day Historical Calendar — Completed 2026-06-23
+**Scope:** Calvert City Odor Forecaster (`calvert_odor_forecaster.py`)
+- Removed the Meteorological Trends tab based on user preference to declutter the dashboard.
+- Extended the future forecast window from 7 days to 16 days (the Open-Meteo API limit).
+- Refactored the forecast outlook visual display into a clean 2x8 grid layout (8 columns) to fit the 16 days without cluttering.
+- Implemented `fetch_historical_weather` pulling the past 30 days of weather data from the Open-Meteo Archive API.
+- Integrated a rolling 30-day "Monthly Calendar View" tab aligned by weekday (Monday-Sunday) to view historical risk.
+- Created styled HTML risk cards (Clear, Moderate, Elevated, High Risk) for each calendar day.
+- Implemented clickable "Details" popovers (`st.popover`) displaying complete meteorological parameters (min/max temperature, wind speed/direction, boundary layer height, relative humidity, atmospheric pressure, rain) explaining the daily risk.
+- Added a `wind_boost` slider to the sidebar (range 1.0 to 3.0, defaulting to a neutral 1.0) and integrated it into the calculations to boost risk predictions when wind directions blow directly towards a location, supporting localized close-proximity advection modeling.
+- Refactored the `wind_penalty` slider into an intuitive percentage format (`0%` to `100%`) so that decreasing the penalty percentage correctly reduces the risk mitigation (thereby increasing the calculated risk), making user calibration intuitive.
+- Added a descriptive `help` parameter to the sidebar Prediction Mode selectbox. Hovering over the question mark icon (`?`) in the sidebar renders a detailed markdown breakdown explaining the geographic and meteorological differences in sensitivity parameters between the urban Pittsburgh baseline and rural Calvert City.
+- Custom-styled the sidebar "Parameters" heading, calendar cards, layout grids, and empty cells to dynamically inherit the Streamlit theme variables (`var(--text-color)`, `var(--secondary-background-color)`, `var(--border-color)`), resolving the readability/contrast issue where dark headings and borders clashed on dark-themed sidebars or backgrounds.
+- Reworked the Paid Tester Management Panel: added dynamic KPI metric summary cards at the top, removed the rigid `st.form` container to make inputs instantly responsive and prevent duplicate submissions, implemented support for logging unscheduled ad-hoc reports (which registers a completed dispatch on the fly), conditionally hide/show the severity slider based on odor detection, added a **Cancel Dispatch** widget and **inline report deletion buttons (🗑️)** directly on report rows (with automatic database cleanup and dispatch reversion), and placed danger zone logs actions in a secure safety expander.
+
+---
+
+### 4. Browser Geolocation, Smell My City Schema, Autofill & Secure Admin Panel — Completed 2026-06-23
+**Scope:** Calvert City Odor Forecaster (`calvert_odor_forecaster.py`)
+- Added client-side browser geolocation retrieval with query parameter reloading and top-level redirection.
+- Added a privacy-preserving "Get Skewed Location" button with random coordinate offset (+/- 0.002 degrees).
+- Aligned database schema and form inputs with Smell My City fields (smell descriptions and symptoms multiselects) and added dynamic text inputs for custom symptoms when "Other" is chosen.
+- Persisted and auto-filled tester name from `.tester_config.json`.
+- Password-protected administrative metrics, logs list, delete operations, CSV downloads, database clears, and credentials updates via secure PBKDF2 hashing using fallback default credentials (`admin` / `calvert2026`).
+
+---
+
+### 5. Forecaster Methodology Corrections — Completed 2026-06-23
+**Scope:** Calvert City Odor Forecaster (`calvert_odor_forecaster.py`)
+- **Fix 1 — Pressure elevation offset:** Added `PRESSURE_ELEVATION_OFFSET = 17.4 hPa` constant to correct for the ~17 hPa elevation gap between Pittsburgh's training data (~370 m ASL, mean 980.9 hPa) and Calvert City (~115 m ASL, mean 998.3 hPa). Pressure term in `predict_ori` now uses `(pressure - offset)` so ORI reflects synoptic anomalies, not topographic artifacts. Raises mid-range ORI by ~5–8 pp.
+- **Fix 2 — Circular wind-direction mean:** Replaced arithmetic mean of wind directions (invalid across 0°/360° wrap) with speed-weighted vector mean using u/v Cartesian components in both `fetch_forecasts` and `fetch_historical_weather`. Prevents the wind-corridor transport filter from misclassifying calm northerly flow as southerly.
+- **Fix 3 — Historical calendar recency:** Switched `fetch_historical_weather` from the ERA5 Archive API (5-day lag → blank recent calendar cells) to the forecast endpoint with `past_days=31` (no lag). Most recent days now always populate.
+- **Fix 4 — Wind multiplier calibration:** Moved the wind corridor penalty/boost from probability-space multiplication to log-odds-space addition (`z += log(penalty)`). ORI output is now a properly calibrated logistic probability. Added `math.exp` overflow guard.
+- **Tier-2:** Removed unused matplotlib imports, fixed non-reproducible `hash()` seed in offline fallback (now uses `hashlib.md5`), corrected data source badge ("NOAA HRRR & GFS" → "Open-Meteo (NWP + ERA5)"), added sector-maintenance comment to `check_wind_alignment`.
+- **Tests:** Updated `scratch/test_forecast_engine.py` — 2 tests corrected for new behavior, 2 new tests added (pressure offset, vector mean). All 5 pass.
+- See full audit: `CALVERT_FORECASTER_REVIEW.md`.
+
+---
+
 ## 🔧 In Progress
 
-*(No items currently in progress)*
+### Static Daily-Generated Forecast Website (GitHub Pages)
+**Scope:** New `odor_forecast_core.py`, `generate_site.py`, `docs/` static site, GitHub Actions cron.
+**Design doc:** `docs/superpowers/specs/2026-06-23-static-odor-forecast-site-design.md`
+- Extract pure forecasting logic from `calvert_odor_forecaster.py` into `odor_forecast_core.py` (no Streamlit).
+- `generate_site.py` fetches weather daily, writes raw model features + coefficients to `docs/data/*.json`.
+- Static `index.html` + `app.js` (Leaflet map, vanilla-JS tabs) compute ORI client-side, with live controls
+  for prediction mode (incl. Custom), wind filter, penalty %, and boost — mirroring the Streamlit sidebar.
+- Report tab uses browser geolocation to pre-fill a Google Form (lat/lon as query params).
+- GitHub Actions cron (`0 6 * * *`) regenerates JSON and deploys to GitHub Pages. Portable to a
+  university/home server via plain crontab later.
 
 ---
 
 ## 📋 Backlog — Prioritized
+
+### 1-PLUME. Plume Analysis & Odor Report Map Overlays (NEW)
+**Priority:** High
+**Effort:** High
+**Description:** Once the static forecast site is live, add two additive Leaflet map layers (the Layers
+control ships from day one with only the Risk layer active):
+- **Plume / deposition layer** (`docs/data/plume.json`): daily-updated atmospheric plume dispersion and
+  deposition footprint from the Calvert City industrial source — GeoJSON contours or a raster overlay
+  showing where emissions are predicted to deposit each day, driven by the same wind/BLH inputs.
+- **Odor reports layer** (`docs/data/reports.json`): severity-colored point markers for tester/community
+  odor reports (exported from the Google Sheet, later a database). Lets us visually correlate where odors
+  were *reported* against where the model predicts trapping and where the plume *deposited*.
+**Why:** Combining forecast risk + modeled plume deposition + actual reports on one daily-updating map is
+the core scientific payoff — visual validation of whether the meteorological model and plume physics
+predict the locations where people actually smell odors.
+**Approach:** Add `fetch_plume()` / `fetch_reports()` to `generate_site.py`'s data-sources section; render
+as toggleable Leaflet layers in `app.js`. No change to the forecast pipeline (design is layer-first).
+**Dependencies:** Static forecast site (In Progress) must land first; plume model source/format TBD.
+
+### 1a. Louisville Model as Calvert City Prediction Mode (NEW)
+**Priority:** High
+**Effort:** Low–Medium
+**Description:** Add a fourth "Louisville Model" option to the forecaster's Prediction Mode sidebar selector. The Louisville de-biased logit model (`Louisville Data/Odor_Complaint_Analysis_v2_debiased.py`) covers a flat-terrain chemical corridor more analogous to Calvert City than Pittsburgh's hilly urban basin. Requires: (a) running the Louisville de-biased logit to extract coefficients, (b) computing a Louisville pressure training mean for an elevation offset constant, (c) adding `COEFFS_LOUISVILLE` dict and the mode in the sidebar.
+**Why:** Current "Estimated Calvert City" mode manually tweaks Pittsburgh coefficients with engineering judgment. Louisville provides an empirical calibration on a more geographically similar industrial area.
+
+### 1b. Automatic Wind-Sector Derivation from GeoJSON (NEW)
+**Priority:** Medium
+**Effort:** Low
+**Description:** The `check_wind_alignment` function has 7 hardcoded sector pairs that were derived once by `scratch/test_sectors.py` from `calvert_zips.geojson`. If the GeoJSON boundaries update, the sectors silently desync. Refactor to derive sector bounds dynamically at startup (or cached on first call) using the same max-gap algorithm already implemented in `test_sectors.py`.
+**Why:** Eliminates the manual copy-paste maintenance step and makes the corridor filter robust to GeoJSON updates.
+
+### 1c. Nocturnal / Early-Morning Aggregation Window (NEW)
+**Priority:** Medium
+**Effort:** Medium
+**Description:** All meteorological predictors currently use 24-hour daily averages. Odor trapping is primarily a nocturnal event (inversions form overnight; 8 AM complaint peak). A 10 PM – 10 AM sub-daily aggregation window for BLH, wind speed, and DTR would give the model a sharper trapping signal. Expose as a sidebar option rather than replacing the default. Pairs with Backlog item #3 (Hourly Model).
+**Why:** Averaging boundary layer height over the full day (including afternoon convective mixing) significantly dilutes the worst-case trapping signal.
 
 ### 2. EPA AQS Monitor Data as Emission Proxy
 **Priority:** High  
@@ -34,7 +128,7 @@
 - Pittsburgh: Allegheny County Health Dept monitors (Liberty, Clairton, Lawrenceville)
 - Louisville: LMAPCD monitors (Rubbertown area, Watson Lane)
 - Source: [EPA AQS API](https://aqs.epa.gov/aqsweb/documents/data_api.html) or bulk downloads from [EPA Daily Summary Files](https://aqs.epa.gov/aqsweb/airdata/download_files.html)  
-**Notes:** We already have hourly EPA monitor CSVs for Calvert City in the plume engine (`calvert_plume_engine_one_day.py` lines 33–42). Same approach can be adapted.
+**Notes:** A similar approach using bulk downloaded EPA files can be adapted.
 
 ---
 
@@ -101,16 +195,7 @@
 
 ---
 
-### 9. Calvert City Model
-**Priority:** Medium  
-**Effort:** Medium  
-**Description:** Adapt the Pittsburgh/Louisville analysis framework to Calvert City, KY, leveraging the HYSPLIT plume dispersion data from the plume engine as an additional independent variable.  
-**Data needed:** Smell reports for Calvert City (if they exist in the SmellPGH database) or proxy complaint data from KDAQ.  
-**Notes:** The plume engine already models hourly dispersion; could create a "modeled exposure" variable representing predicted ground-level concentration at residential zip codes.
-
----
-
-### 10. Cross-City Model Mapping & Generalization
+### 9. Cross-City Model Mapping & Generalization
 **Priority:** High  
 **Effort:** Medium  
 **Description:** Map/apply the trained Pittsburgh model directly onto Louisville data (and vice-versa) to evaluate how well a model trained in one city predicts odor events in another.  
@@ -118,7 +203,7 @@
 
 ---
 
-### 11. Complaint Threshold & Binning Sensitivity Analysis
+### 10. Complaint Threshold & Binning Sensitivity Analysis
 **Priority:** Medium  
 **Effort:** Medium  
 **Description:** Run a sensitivity analysis on how odor events are binned and classified. Currently, odor events are defined by a threshold (mean weighted odor burden). We need to test other classification criteria:
@@ -131,7 +216,7 @@
 
 ---
 
-### 12. Precipitation Outlier and Data Alignment Review
+### 11. Precipitation Outlier and Data Alignment Review
 **Priority:** High  
 **Effort:** Low  
 **Description:** Investigate the "Odor Complaints vs. Precipitation" plot. There appears to be a major outlier where complaints are very high (almost above 3 on the average scale) during a day with precipitation that is not represented in the Open-Meteo precipitation metrics (where max hourly rain is 0.99 inches). 
@@ -141,24 +226,24 @@
 
 ---
 
-### 13. Plot Bin Size Optimization
+### 12. Plot Bin Size Optimization
 **Priority:** Low  
 **Effort:** Low  
 **Description:** Optimize the bin sizes for exploratory plots. For variables with high localized variation (like temperature), expand the bin width beyond 1 degree (e.g., to 3-degree or 5-degree bins) to smooth out noise and reveal the underlying physical pattern more clearly.
 
 ---
 
-### 14. Spatial Odor Severity Mapping for Source Attribution
+### 13. Spatial Odor Severity Mapping for Source Attribution
 **Priority:** High  
 **Effort:** High  
-**Description:** Use the spatial coordinates (lat/lon) or zip codes of smell reports, combined with their 1-5 severity values, to pinpoint source locations.
+**Description:** Use the spatial coordinates (lat/lon) of smell reports, combined with their 1-5 severity values, to pinpoint source locations.
 **Approach:** 
 - Test if a "distance-decay" pattern exists: are reports closer to the industrial source rated as 5 (highest severity), with 4, 3, 2, 1 extending outward?
 - Analyze if reporting patterns match industrial center coordinates or if user reporting bias (e.g., people selecting 1 vs. 5 randomly) confounds the signal.
 
 ---
 
-### 15. Industrial Facility Operating Hours & Proximity Features
+### 14. Industrial Facility Operating Hours & Proximity Features
 **Priority:** High  
 **Effort:** Medium  
 **Description:** Create engineered features representing facility activity and proximity.
@@ -169,12 +254,22 @@
 
 ---
 
-### 16. Machine Learning Model Comparison
+### 15. Machine Learning Model Comparison
 **Priority:** Medium  
 **Effort:** Medium  
 **Description:** Fit and compare non-linear machine learning models (e.g., Random Forest, XGBoost, Support Vector Regressors) against the classical regression models (OLS, Poisson, Logit).
 **Why:** Machine learning models can automatically capture complex, non-linear interactions between weather variables (e.g., wind speed and boundary layer height interactions) without requiring manual interaction terms.
 **Goal:** Determine which model type achieves the best cross-validated predictive accuracy.
+
+---
+
+### 16. Deploy Forecasting Dashboard to Streamlit Cloud / GitHub Pages
+**Priority:** High  
+**Effort:** Medium  
+**Description:** Make the forecasting dashboard publicly accessible so paid testers can view real-time risk predictions and report odors directly.  
+**Approach:**  
+- **Option A:** Deploy the Streamlit app to Streamlit Community Cloud and connect it to a cloud database (e.g., Google Sheets API, Supabase, or PostgreSQL) to store tester feedback.  
+- **Option B:** Build a static dashboard compiler that runs via GitHub Actions, uploads predictions to GitHub Pages, and embeds a Google Form to capture tester feedback.
 
 ---
 
@@ -187,6 +282,4 @@
 - **Q5:** Can we detect the COVID-19 lockdown effect on industrial emissions through complaint count changes in March–May 2020?
 - **Q6:** **Literature Review:** Has there been other weather-variable analysis published linking local weather station data to odor complaints and air quality indices? Let's check existing publications.
 
----
-
-*Last updated: 2026-06-17*
+*Last updated: 2026-06-23*
