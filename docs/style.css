@@ -67,3 +67,11 @@ button:hover { background:#f1f5f9; }
 /* Location selects */
 #tab-forecast > label, #tab-monthly > label { font-size:0.82rem; display:block; margin-bottom:0.4rem; }
 select { font-size:0.82rem; padding:0.25rem 0.4rem; border:1px solid #cbd5e1; border-radius:4px; }
+
+/* Control groupings under Spatial & Dispersion */
+.controls h4 { margin: 0.8rem 0 0.5rem 0; font-size: 0.72rem; font-weight: 600; color: #475569; text-transform: uppercase; letter-spacing: 0.04em; }
+.control-group { background: #f8fafc; padding: 0.6rem; border-radius: 6px; border: 1px solid #e2e8f0; margin-bottom: 0.6rem; }
+.control-group:last-of-type { margin-bottom: 0; }
+.control-group label { margin: 0.4rem 0 !important; }
+.control-group label.toggle { margin-top: 0 !important; margin-bottom: 0.5rem !important; }
+.control-group label:last-of-type { margin-bottom: 0 !important; }
