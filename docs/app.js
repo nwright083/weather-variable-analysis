@@ -244,31 +244,33 @@ function renderReportTab() {
   panel.innerHTML =
     '<div class="clean-card" style="text-align:left;max-width:560px;">' +
     '<h3 style="margin:0 0 0.5rem;">Report an Odor</h3>' +
-    '<p style="font-size:0.85rem;margin:0 0 0.6rem;">Optionally share your location so we can map where odors are reported.</p>' +
-    '<div id="geo-status" style="font-size:0.82rem;opacity:0.7;margin-bottom:0.5rem;">Location not set.</div>' +
-    '<div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.6rem;">' +
-    '  <button id="btn-geo">📍 Get My Location</button>' +
-    '  <button id="btn-geo-skew">🛡️ Skewed (Privacy)</button>' +
+    '<p style="font-size:0.85rem;margin:0 0 0.8rem;color:#475569;">Choose an option — your location will be captured and the report form will open automatically with it pre-filled.</p>' +
+    '<div style="display:flex;flex-direction:column;gap:0.6rem;">' +
+    '  <button id="btn-geo" class="report-btn">📍 Use My Exact Location</button>' +
+    '  <button id="btn-geo-skew" class="report-btn">🛡️ Use Approximate Location (Privacy)</button>' +
     '</div>' +
-    '<a id="open-form" class="form-link" href="' + buildFormUrl(null, null) + '" target="_blank" rel="noopener">Open Report Form →</a>' +
+    '<div id="geo-status" style="font-size:0.78rem;color:#64748b;margin-top:0.7rem;min-height:1.2em;"></div>' +
     '</div>';
 
-  var state = { lat: null, lon: null };
-  function setStatus(msg) { panel.querySelector("#geo-status").textContent = msg; }
-  function refreshLink() { panel.querySelector("#open-form").href = buildFormUrl(state.lat, state.lon); }
-
-  function grab(skew) {
-    if (!navigator.geolocation) { setStatus("Geolocation not supported by this browser."); return; }
+  function openForm(skew) {
+    var statusEl = panel.querySelector("#geo-status");
+    if (!navigator.geolocation) {
+      statusEl.textContent = "Geolocation not supported by this browser.";
+      return;
+    }
+    statusEl.textContent = "Getting your location…";
     navigator.geolocation.getCurrentPosition(function (pos) {
       var lat = pos.coords.latitude, lon = pos.coords.longitude;
       if (skew) { lat += (Math.random() * 0.004) - 0.002; lon += (Math.random() * 0.004) - 0.002; }
-      state.lat = lat; state.lon = lon;
-      setStatus((skew ? "Skewed" : "Exact") + " location set: " + lat.toFixed(5) + ", " + lon.toFixed(5));
-      refreshLink();
-    }, function (err) { setStatus("Location error: " + err.message); }, { enableHighAccuracy: true, timeout: 10000 });
+      statusEl.textContent = (skew ? "Approximate" : "Exact") + " location captured — opening form…";
+      window.open(buildFormUrl(lat, lon), "_blank", "noopener");
+    }, function (err) {
+      statusEl.textContent = "Could not get location: " + err.message;
+    }, { enableHighAccuracy: true, timeout: 10000 });
   }
-  panel.querySelector("#btn-geo").addEventListener("click", function () { grab(false); });
-  panel.querySelector("#btn-geo-skew").addEventListener("click", function () { grab(true); });
+
+  panel.querySelector("#btn-geo").addEventListener("click", function () { openForm(false); });
+  panel.querySelector("#btn-geo-skew").addEventListener("click", function () { openForm(true); });
 }
 
 // ── Main bootstrap ────────────────────────────────────────────────────────────
