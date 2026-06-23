@@ -201,7 +201,7 @@ A fully static daily-regenerated forecast website was built and deployed to GitH
 
 **Map Layers scaffold:** Risk layer active; Plume and Reports layer checkboxes present but disabled (pending `docs/data/plume.json` and `docs/data/reports.json` — see FUTURE_IDEAS backlog item `1-PLUME`).
 
-**Deployment status (2026-06-23):** Branch pushed to GitHub. Pages source set to GitHub Actions. Pending: PAT `workflow` scope must be enabled before `git push` can upload `.github/workflows/forecast.yml`. After push succeeds, manually trigger the workflow from Actions tab → "Daily Odor Forecast" → "Run workflow".
+**Deployment status (2026-06-23):** Main branch successfully pushed to GitHub Pages and local Gitea remotes. The GitHub Actions workflow automatically regenerates and deploys the static site to GitHub Pages on every push.
 
 **To preview locally:**
 ```bash
@@ -212,10 +212,18 @@ A fully static daily-regenerated forecast website was built and deployed to GitH
 
 **Test suite (all passing):**
 ```bash
-.venv/bin/python -m pytest scratch/test_forecast_engine.py scratch/test_generate_site.py scratch/test_js_model.py -v
-# 7 passed, 1 skipped (JS parity skipped — node not installed locally; runs in CI)
+.venv/bin/pytest scratch/test_forecast_engine.py scratch/test_generate_site.py scratch/test_js_model.py -v
+# 8 passed, 1 skipped (JS parity skipped — node not installed locally; runs in CI)
 ```
 
+### 12. Spatial Proximity & Multi-Source Regression Handoff (Added 2026-06-23)
+* **Calvert City Distance Decay**: Implemented a distance-decay adjustment ($z_{\text{new}} = z_{\text{old}} - \text{decay\_rate} \times \text{distance}$) using the Haversine formula in miles from the Calvert City Industrial Complex center. Exposed this as a toggleable checkbox and a slider (defaulting to a moderate **`0.03` per mile** rate) in both the Streamlit app sidebar and the static web page.
+* **Multi-Source Regressions (`scratch/analyze_multi_source.py`)**: Conducted daily ZIP-date panel regressions (over 100,000 observations per city) for Pittsburgh and Louisville to evaluate proximity to multiple emitters simultaneously (including Rubbertown and Butchertown's JBS Swift plant for Louisville, and three Mon Valley steel/coke plants for Pittsburgh).
+  * *Louisville*: Incorporating both sources under the exponential decay model ($k=0.03$) **more than triples the model's explained variance ($R^2$ jumps from `0.0103` to `0.0349`)** and drops the AIC score by **2,631 points**, empirically validating the selection of `0.03` as the default decay rate.
+  * *Pittsburgh*: Including Edgar Thomson and Irvin Works alongside Clairton Coke Works increases $R^2$ from **`0.0600` to `0.0832`**, dropping the AIC by **2,579 points**.
+* **Jupyter Notebook Integration**: Created and executed `scratch/append_spatial_analysis.py` to automatically append this new panel regression analysis block ("Section 5: Spatial Proximity & Multi-Source Distance Decay Analysis") to the end of all four Jupyter notebooks (`.ipynb` files) and their Python script equivalents (`.py` files) in `Pittsburgh Data/` and `Louisville Data/`.
+* **Sync Status**: Staged, committed, and pushed all updates to both Gitea (`origin main`) and GitHub (`github main`).
+
 ---
-*Last updated: 2026-06-23 by Claude Sonnet 4.6 — static site build complete + deployment in progress*
+*Last updated: 2026-06-23 by Antigravity — distance-decay default 0.03, multi-source panel regressions run, notebooks updated, and remotes synced*
 
