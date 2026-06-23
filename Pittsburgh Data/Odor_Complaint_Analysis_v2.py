@@ -1953,9 +1953,10 @@ daily_zip.columns = flat_cols
 daily_zip['dtr'] = daily_zip['temp_max'] - daily_zip['temp_min']
 daily_zip = daily_zip.dropna()
 
-# Add exponential decay features (k=0.03)
+# Add exponential decay features (k=0.03 and k=0.02)
 for name in emitters.keys():
-    daily_zip[f'exp_{name}'] = np.exp(-0.03 * daily_zip[f'dist_{name}'])
+    daily_zip[f'exp_03_{name}'] = np.exp(-0.03 * daily_zip[f'dist_{name}'])
+    daily_zip[f'exp_02_{name}'] = np.exp(-0.02 * daily_zip[f'dist_{name}'])
 
 print(f"Panel dataset generated: {len(daily_zip)} observations.")
 
@@ -1963,17 +1964,23 @@ print(f"Panel dataset generated: {len(daily_zip)} observations.")
 import statsmodels.api as sm
 weather_vars_p = ['temperature', 'precipitation', 'wind_speed', 'relative_humidity',
                   'boundary_layer_height', 'atmospheric_pressure', 'solar_radiation', 'dtr']
-exp_cols_p = [f'exp_{name}' for name in emitters.keys()]
+exp_03_cols = [f'exp_03_{name}' for name in emitters.keys()]
+exp_02_cols = [f'exp_02_{name}' for name in emitters.keys()]
 
 # Model A: Weather Only
 X_base = sm.add_constant(daily_zip[weather_vars_p])
 res_base = sm.OLS(daily_zip['complaints'], X_base).fit()
 
 # Model B: Weather + Multi-Source Exp-Decay (k=0.03)
-X_spatial = sm.add_constant(daily_zip[weather_vars_p + exp_cols_p])
-res_spatial = sm.OLS(daily_zip['complaints'], X_spatial).fit()
+X_spatial_03 = sm.add_constant(daily_zip[weather_vars_p + exp_03_cols])
+res_spatial_03 = sm.OLS(daily_zip['complaints'], X_spatial_03).fit()
+
+# Model C: Weather + Multi-Source Exp-Decay (k=0.02)
+X_spatial_02 = sm.add_constant(daily_zip[weather_vars_p + exp_02_cols])
+res_spatial_02 = sm.OLS(daily_zip['complaints'], X_spatial_02).fit()
 
 print("\n=== Model A (Weather-Only) R²: ", round(res_base.rsquared, 4))
-print("=== Model B (Weather + Exp-Decay 0.03) R²: ", round(res_spatial.rsquared, 4))
-print("\n=== Model B (Weather + Exp-Decay 0.03) Regression Results ===")
-print(res_spatial.summary())
+print("=== Model B (Weather + Exp-Decay 0.03) R²: ", round(res_spatial_03.rsquared, 4))
+print("=== Model C (Weather + Exp-Decay 0.02) R²: ", round(res_spatial_02.rsquared, 4))
+print("\n=== Model C (Weather + Exp-Decay 0.02) Regression Results ===")
+print(res_spatial_02.summary())

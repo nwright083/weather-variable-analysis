@@ -119,13 +119,13 @@ as toggleable Leaflet layers in `app.js`. No change to the forecast pipeline (de
 **Description:** All meteorological predictors currently use 24-hour daily averages. Odor trapping is primarily a nocturnal event (inversions form overnight; 8 AM complaint peak). A 10 PM – 10 AM sub-daily aggregation window for BLH, wind speed, and DTR would give the model a sharper trapping signal. Expose as a sidebar option rather than replacing the default. Pairs with Backlog item #3 (Hourly Model).
 **Why:** Averaging boundary layer height over the full day (including afternoon convective mixing) significantly dilutes the worst-case trapping signal.
 
-### 1d. Multi-Source Spatial Modeling & Empirical Proximity Calibration (NEW)
+### 1d. Multi-Source Spatial Modeling & Empirical Proximity Calibration (COMPLETED 2026-06-23)
 **Priority:** High
 **Effort:** Medium
-**Description:** Expand the spatial distance decay analysis to incorporate multiple source points rather than a single emitter (e.g., including the JBS Swift pig processing plant in Butchertown for Louisville, and multiple major industrial plants in Pittsburgh).
-* **Multi-Source Exposure Index**: Instead of measuring distance to a single plant, calculate an aggregate spatial exposure metric $E_i = \sum_{s} e^{-k \cdot d_{i,s}}$ for each ZIP code $i$ across all emitters $s$, representing cumulative pollutant exposure.
-* **Empirical Calibration**: Use the log-odds coefficients of this spatial exposure metric from logistic regression runs on Louisville/Pittsburgh panel datasets to set the default distance decay rate (e.g., in `docs/app.js` and `calvert_odor_forecaster.py`), providing an empirical foundation rather than relying on heuristic choices.
-**Why:** Many odor reports in larger cities originate from non-chemical facilities (e.g., food processing in Butchertown). Transitioning to a multi-source model ensures these reports are accounted for, and provides a scientifically solid decay calibration before moving to full physical plume models.
+**Description:** Expanded the spatial distance decay analysis to incorporate multiple source points rather than a single emitter (including JBS Swift Butchertown & Rubbertown for Louisville, and Clairton Coke Works, Edgar Thomson, and Irvin Works for Pittsburgh).
+* **Multi-Source Exposure Index (Completed)**: Modeled cumulative exposure across multiple emitters using exponential distance-decay factors.
+* **Empirical Calibration (Completed)**: Evaluated decay rates of $k = 0.03$ and $k = 0.02$ per mile via panel regressions. Calibrated the default rate to **`0.02` per mile** to match the Pittsburgh OLS baseline and fit Calvert City's open, rural topography (where lack of urban obstacles allows plumes to carry farther with slower dilution).
+* **Next Steps**: Move from static daily distance-based indicators to dynamic hourly wind-plume exposure metrics (e.g. HYSPLIT dispersion models) that account for hourly weather shifts.
 
 ### 2. EPA AQS Monitor Data as Emission Proxy
 **Priority:** High  

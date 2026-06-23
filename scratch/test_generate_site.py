@@ -23,6 +23,7 @@ def _fake_df(dates):
                 'precipitation': 0.0, 'diurnal_temperature_range': 16.0,
                 'boundary_layer_height': 800.0, 'atmospheric_pressure': 1005.0,
                 'bearing_from_source': generate_site.core.calculate_bearing(lat, lon),
+                'distance_from_source': 5.0,
             })
     return pd.DataFrame(rows)
 
@@ -34,7 +35,7 @@ def test_build_feature_payload_schema():
     assert payload["dates"] == dates
     assert {l["zip"] for l in payload["locations"]} == {"42029","42025","42045","42081","42058","42001","42003"}
     cell = payload["features"]["2026-06-24"]["42029"]
-    for k in ["aligned","temp","temp_sq","solar","rh","wind_speed","wind_dir","precip","dtr","blh","pressure"]:
+    for k in ["aligned","distance","temp","temp_sq","solar","rh","wind_speed","wind_dir","precip","dtr","blh","pressure"]:
         assert k in cell, f"missing {k}"
     assert isinstance(cell["aligned"], bool)
 
