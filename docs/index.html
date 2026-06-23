@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Calvert City Odor Risk Outlook</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div>
+      <h1>Calvert City &amp; Surrounding Counties Odor Risk Outlook</h1>
+      <p class="subtitle">Odor trapping forecasts for Marshall, McCracken &amp; Livingston Counties.</p>
+    </div>
+    <div class="source-meta">
+      <span class="badge-pill badge-clear" id="source-badge">Loading…</span>
+      <div class="updated" id="updated-stamp"></div>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="controls" id="controls">
+      <h3>Parameters</h3>
+      <label>Prediction Mode
+        <select id="mode-select"></select>
+      </label>
+      <div id="custom-coeffs" class="custom-coeffs" hidden></div>
+      <hr />
+      <label class="toggle"><input type="checkbox" id="wind-filter" checked /> Wind Corridor Filter</label>
+      <label>Penalty (Non-Corridor) <span id="penalty-val">75%</span>
+        <input type="range" id="penalty" min="0" max="100" step="5" value="75" />
+      </label>
+      <label>Boost (Corridor-Aligned) <span id="boost-val">1.00</span>
+        <input type="range" id="boost" min="1" max="3" step="0.05" value="1" />
+      </label>
+    </aside>
+
+    <main class="content">
+      <nav class="tabs">
+        <button data-tab="map" class="tab active">🗺️ Map</button>
+        <button data-tab="forecast" class="tab">📅 16-Day</button>
+        <button data-tab="monthly" class="tab">📅 30-Day</button>
+        <button data-tab="report" class="tab">📋 Report Odor</button>
+      </nav>
+      <section id="tab-map" class="tab-panel active"></section>
+      <section id="tab-forecast" class="tab-panel">
+        <label>Location
+          <select id="forecast-loc"></select>
+        </label>
+        <div id="forecast-grid" class="card-grid"></div>
+      </section>
+      <section id="tab-monthly" class="tab-panel"></section>
+      <section id="tab-report" class="tab-panel"></section>
+    </main>
+  </div>
+
+  <script>
+    // Swap these for your real Google Form. Pre-fill entry IDs come from the form's
+    // "Get pre-filled link" feature (one per field).
+    window.GOOGLE_FORM = {
+      viewUrl: "https://docs.google.com/forms/d/e/REPLACE_WITH_FORM_ID/viewform",
+      latEntry: "entry.0000000001",
+      lonEntry: "entry.0000000002"
+    };
+  </script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="model.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

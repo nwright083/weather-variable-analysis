@@ -11,3 +11,6 @@ __pycache__/
 .DS_Store
 
 scratch/
+
+# Generated forecast data (produced by generate_site.py / CI)
+docs/data/
