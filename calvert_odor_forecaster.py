@@ -305,7 +305,7 @@ st.sidebar.markdown("---")
 use_distance_decay = st.sidebar.toggle("Enable Distance Decay Heuristic", value=True)
 distance_decay_rate = st.sidebar.slider(
     "Distance Decay Rate (per mile)",
-    min_value=0.0, max_value=0.5, value=0.1, step=0.01,
+    min_value=0.0, max_value=0.5, value=0.03, step=0.01,
     help="When enabled, Odor Risk Index (ORI) decreases with distance from the industrial complex. "
          "Decay penalty = distance (miles) * rate. Subtracts from the model log-odds before applying the sigmoid."
 )
