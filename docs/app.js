@@ -23,6 +23,8 @@ const APP = {
       windFilter: document.getElementById("wind-filter").checked,
       penalty: 1 - (parseFloat(document.getElementById("penalty").value) / 100),
       boost: parseFloat(document.getElementById("boost").value),
+      distanceDecay: document.getElementById("distance-decay").checked,
+      decayRate: parseFloat(document.getElementById("decay-rate").value),
     };
   },
   oriFor(cell) { return OdorModel.computeOri(cell, this.activeCoeffs(), this.opts()); },
@@ -62,12 +64,13 @@ function buildCustomCoeffSliders() {
 }
 
 function wireControls() {
-  var ids = ["mode-select", "wind-filter", "penalty", "boost"];
+  var ids = ["mode-select", "wind-filter", "penalty", "boost", "distance-decay", "decay-rate"];
   ids.forEach(function (id) {
     document.getElementById(id).addEventListener("input", function () {
       document.getElementById("custom-coeffs").hidden = (APP.mode() !== "custom");
       document.getElementById("penalty-val").textContent = document.getElementById("penalty").value + "%";
       document.getElementById("boost-val").textContent = parseFloat(document.getElementById("boost").value).toFixed(2);
+      document.getElementById("decay-rate-val").textContent = parseFloat(document.getElementById("decay-rate").value).toFixed(2);
       APP._fire();
     });
   });
@@ -286,6 +289,11 @@ async function main() {
   buildModeSelect();
   buildCustomCoeffSliders();
   buildForecastLocSelect();
+  if (APP.meta.distance_defaults) {
+    document.getElementById("distance-decay").checked = APP.meta.distance_defaults.enabled;
+    document.getElementById("decay-rate").value = APP.meta.distance_defaults.rate;
+    document.getElementById("decay-rate-val").textContent = APP.meta.distance_defaults.rate.toFixed(2);
+  }
   wireControls();
 
   mapPanelScaffold();

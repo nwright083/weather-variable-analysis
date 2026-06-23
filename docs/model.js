@@ -21,6 +21,9 @@
         ? Math.log(Math.max(opts.boost, 1e-9))
         : Math.log(Math.max(opts.penalty, 1e-9));
     }
+    if (opts.distanceDecay && cell.distance) {
+      z -= opts.decayRate * cell.distance;
+    }
     z = Math.max(-60, Math.min(60, z));
     return Math.round((100 / (1 + Math.exp(-z))) * 10) / 10;
   }

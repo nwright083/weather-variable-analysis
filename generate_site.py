@@ -35,6 +35,7 @@ def build_feature_payload(df, dates_sorted):
             aligned = core.check_wind_alignment(row["wind_direction"], row["location"])
             per_zip[zip_code] = {
                 "aligned": bool(aligned),
+                "distance": round(float(row["distance_from_source"]), 2),
                 "temp": round(float(row["temperature"]), 2),
                 "temp_sq": round(float(row["temperature_squared"]), 2),
                 "solar": round(float(row["solar_radiation"]), 2),
@@ -77,6 +78,7 @@ def build_meta():
         },
         "custom_slider_ranges": custom_ranges,
         "wind_defaults": {"filter": True, "penalty_pct": 75, "boost": 1.0},
+        "distance_defaults": {"enabled": True, "rate": 0.10},
     }
 
 

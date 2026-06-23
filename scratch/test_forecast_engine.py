@@ -215,6 +215,65 @@ class TestCalvertOdorForecaster(unittest.TestCase):
         # Misaligned must always be lower than aligned
         self.assertLess(ori_misaligned, ori_aligned)
 
+    def test_distance_decay(self):
+        """Verify that distance decay reduces the calculated ORI as distance increases."""
+        mock_row_close = pd.Series({
+            'temperature': 70.0,
+            'temperature_squared': 70.0 ** 2,
+            'solar_radiation': 200.0,
+            'relative_humidity': 60.0,
+            'wind_speed': 3.0,
+            'precipitation': 0.0,
+            'diurnal_temperature_range': 15.0,
+            'boundary_layer_height': 1200.0,
+            'atmospheric_pressure': 1013.0,
+            'wind_direction': 20.0,
+            'bearing_from_source': 200.0,
+            'latitude': 37.0317,
+            'longitude': -88.3542,
+            'distance_from_source': 1.24,  # Calvert City (close)
+        })
+
+        mock_row_far = mock_row_close.copy()
+        mock_row_far['latitude'] = 37.0834
+        mock_row_far['longitude'] = -88.6000
+        mock_row_far['distance_from_source'] = 14.12  # Paducah (far)
+
+        # Baseline predictions (no distance decay) should be identical if they have same weather
+        ori_close_base = predict_ori(mock_row_close, COEFFS_EST_CALVERT, use_distance_decay=False)
+        ori_far_base = predict_ori(mock_row_far, COEFFS_EST_CALVERT, use_distance_decay=False)
+        self.assertEqual(ori_close_base, ori_far_base)
+
+        # With distance decay enabled
+        decay_rate = 0.1
+        ori_close_decay = predict_ori(mock_row_close, COEFFS_EST_CALVERT, use_distance_decay=True, distance_decay_rate=decay_rate)
+        ori_far_decay = predict_ori(mock_row_far, COEFFS_EST_CALVERT, use_distance_decay=True, distance_decay_rate=decay_rate)
+
+        # Both should be lower than baseline, and far should be lower than close
+        self.assertLess(ori_close_decay, ori_close_base)
+        self.assertLess(ori_far_decay, ori_far_base)
+        self.assertLess(ori_far_decay, ori_close_decay)
+
+        # Verify math exactly for far location
+        base_z = (
+            COEFFS_EST_CALVERT['const'] +
+            COEFFS_EST_CALVERT['temperature'] * mock_row_far['temperature'] +
+            COEFFS_EST_CALVERT['temperature_squared'] * mock_row_far['temperature_squared'] +
+            COEFFS_EST_CALVERT['solar_radiation'] * mock_row_far['solar_radiation'] +
+            COEFFS_EST_CALVERT['relative_humidity'] * mock_row_far['relative_humidity'] +
+            COEFFS_EST_CALVERT['wind_speed'] * mock_row_far['wind_speed'] +
+            COEFFS_EST_CALVERT['precipitation'] * mock_row_far['precipitation'] +
+            COEFFS_EST_CALVERT['diurnal_temperature_range'] * mock_row_far['diurnal_temperature_range'] +
+            COEFFS_EST_CALVERT['boundary_layer_height'] * mock_row_far['boundary_layer_height'] +
+            COEFFS_EST_CALVERT['atmospheric_pressure'] * (mock_row_far['atmospheric_pressure'] - PRESSURE_ELEVATION_OFFSET)
+        )
+        # Add default wind filter boost (aligned) -> +0.0
+        # Subtract decay: distance * rate = 14.12 * 0.1 = 1.412
+        z_expected = base_z - (decay_rate * mock_row_far['distance_from_source'])
+        z_expected = max(-60.0, min(60.0, z_expected))
+        expected_ori = round(100.0 / (1.0 + math.exp(-z_expected)), 1)
+        self.assertAlmostEqual(ori_far_decay, expected_ori, places=1)
+
 
 if __name__ == '__main__':
     unittest.main()

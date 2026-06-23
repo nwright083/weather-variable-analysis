@@ -68,6 +68,20 @@ def calculate_bearing(lat2, lon2):
     return (bearing + 360) % 360
 
 
+def calculate_distance(lat2, lon2):
+    """Calculates the distance in miles from the industrial complex using the Haversine formula."""
+    lat1, lon1 = IND_LAT, IND_LON
+    R = 3958.8  # Earth radius in miles
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
+
+    a = math.sin(delta_phi / 2.0)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2.0)**2
+    c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
+    return R * c
+
+
 # Sector bounds derived from calvert_zips.geojson via scratch/test_sectors.py;
 # regenerate them if the geojson boundaries change.
 def check_wind_alignment(wind_from, location_or_bearing, tolerance=10.0):
@@ -124,7 +138,7 @@ def get_risk_meta(ori):
         return "High Risk", "badge-high", [220, 38, 38]
 
 
-def predict_ori(row, coeffs, *, use_wind_filter=True, wind_penalty=0.25, wind_boost=1.0):
+def predict_ori(row, coeffs, *, use_wind_filter=True, wind_penalty=0.25, wind_boost=1.0, use_distance_decay=False, distance_decay_rate=0.0):
     z = (
         coeffs['const'] +
         coeffs['temperature'] * row['temperature'] +
@@ -145,6 +159,12 @@ def predict_ori(row, coeffs, *, use_wind_filter=True, wind_penalty=0.25, wind_bo
             z += math.log(max(wind_penalty, 1e-9))
         else:
             z += math.log(max(wind_boost, 1e-9))
+    if use_distance_decay:
+        dist = row.get('distance_from_source', None)
+        if dist is None and 'latitude' in row and 'longitude' in row:
+            dist = calculate_distance(row['latitude'], row['longitude'])
+        if dist is not None:
+            z -= distance_decay_rate * dist
     z = max(-60.0, min(60.0, z))
     return round(100.0 / (1.0 + math.exp(-z)), 1)
 
@@ -220,6 +240,7 @@ def fetch_forecasts(locations):
             daily_df['latitude'] = loc_info["coords"][0]
             daily_df['longitude'] = loc_info["coords"][1]
             daily_df['bearing_from_source'] = calculate_bearing(loc_info["coords"][0], loc_info["coords"][1])
+            daily_df['distance_from_source'] = calculate_distance(loc_info["coords"][0], loc_info["coords"][1])
 
             all_daily_records.append(daily_df)
 
@@ -344,6 +365,7 @@ def fetch_historical_weather(locations):
             daily_df['latitude'] = loc_info["coords"][0]
             daily_df['longitude'] = loc_info["coords"][1]
             daily_df['bearing_from_source'] = calculate_bearing(loc_info["coords"][0], loc_info["coords"][1])
+            daily_df['distance_from_source'] = calculate_distance(loc_info["coords"][0], loc_info["coords"][1])
 
             all_daily_records.append(daily_df)
 

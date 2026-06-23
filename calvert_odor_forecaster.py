@@ -301,6 +301,15 @@ wind_boost = st.sidebar.slider(
          "before the sigmoid so ORI stays a calibrated probability."
 )
 
+st.sidebar.markdown("---")
+use_distance_decay = st.sidebar.toggle("Enable Distance Decay Heuristic", value=True)
+distance_decay_rate = st.sidebar.slider(
+    "Distance Decay Rate (per mile)",
+    min_value=0.0, max_value=0.5, value=0.1, step=0.01,
+    help="When enabled, Odor Risk Index (ORI) decreases with distance from the industrial complex. "
+         "Decay penalty = distance (miles) * rate. Subtracts from the model log-odds before applying the sigmoid."
+)
+
 # ==========================================
 # 5. DATA INGESTION & CALCULATION
 # ==========================================
@@ -311,6 +320,7 @@ forecast_df['ori'] = forecast_df.apply(
     lambda r: core.predict_ori(
         r, active_coeffs,
         use_wind_filter=use_wind_filter, wind_penalty=wind_penalty, wind_boost=wind_boost,
+        use_distance_decay=use_distance_decay, distance_decay_rate=distance_decay_rate,
     ), axis=1)
 
 # ==========================================
@@ -575,6 +585,7 @@ with tab_monthly:
         lambda r: core.predict_ori(
             r, active_coeffs,
             use_wind_filter=use_wind_filter, wind_penalty=wind_penalty, wind_boost=wind_boost,
+            use_distance_decay=use_distance_decay, distance_decay_rate=distance_decay_rate,
         ), axis=1)
     
     # Filter for the selected location
