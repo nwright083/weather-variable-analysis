@@ -33,6 +33,10 @@
       
       <div class="control-group">
         <label class="toggle"><input type="checkbox" id="wind-filter" checked /> Wind Corridor Filter</label>
+        <div class="control-row">
+          <label class="toggle"><input type="checkbox" id="continuous-alignment" checked /> Continuous Alignment</label>
+          <span class="hint">Cosine-based (0–1) instead of on/off sectors</span>
+        </div>
         <label>Penalty (Non-Corridor) <span id="penalty-val">75%</span>
           <input type="range" id="penalty" min="0" max="100" step="5" value="75" />
         </label>
@@ -74,7 +78,8 @@
     window.GOOGLE_FORM = {
       viewUrl: "https://docs.google.com/forms/d/e/1FAIpQLScJhcqfA3ZsgGOUcYdRXBw0aPOZb3_t1WnlcU9Lx6P2FJgHtQ/viewform",
       latEntry: "entry.1224216756",
-      lonEntry: "entry.1314282346"
+      lonEntry: "entry.1314282346",
+      tsEntry: "",  // Set to Google Form entry ID for timestamp field (add a short-answer question to your form first)
     };
   </script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>

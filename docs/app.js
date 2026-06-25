@@ -21,6 +21,7 @@ const APP = {
     return {
       pressureOffset: this.meta.pressure_offset,
       windFilter: document.getElementById("wind-filter").checked,
+      continuousAlignment: document.getElementById("continuous-alignment")?.checked ?? true,
       penalty: 1 - (parseFloat(document.getElementById("penalty").value) / 100),
       boost: parseFloat(document.getElementById("boost").value),
       distanceDecay: document.getElementById("distance-decay").checked,
@@ -64,7 +65,7 @@ function buildCustomCoeffSliders() {
 }
 
 function wireControls() {
-  var ids = ["mode-select", "wind-filter", "penalty", "boost", "distance-decay", "decay-rate"];
+  var ids = ["mode-select", "wind-filter", "continuous-alignment", "penalty", "boost", "distance-decay", "decay-rate"];
   ids.forEach(function (id) {
     document.getElementById(id).addEventListener("input", function () {
       document.getElementById("custom-coeffs").hidden = (APP.mode() !== "custom");
@@ -113,7 +114,8 @@ function renderForecastGrid() {
 function buildForecastLocSelect() {
   var sel = document.getElementById("forecast-loc");
   APP.forecast.locations.forEach(function (l) {
-    var o = document.createElement("option"); o.value = l.zip; o.textContent = l.zip + " — " + l.name;
+    var locId = l.id || l.zip;
+    var o = document.createElement("option"); o.value = locId; o.textContent = locId + " — " + l.name;
     sel.appendChild(o);
   });
   sel.addEventListener("change", renderForecastGrid);
@@ -122,10 +124,13 @@ function buildForecastLocSelect() {
 // ── Leaflet map ───────────────────────────────────────────────────────────────
 
 APP._mapState = { map: null, geo: null, geojson: null, dateSel: null };
+APP._map = null;
+APP._userMarker = null;
 
 function mapPanelScaffold() {
   var panel = document.getElementById("tab-map");
   panel.innerHTML =
+    '<button id="btn-locate-map" class="btn-locate">📍 Use My Location</button>' +
     '<div class="map-toolbar">' +
     '  <label>Date <select id="map-date"></select></label>' +
     '  <fieldset class="layers"><legend>Layers</legend>' +
@@ -153,7 +158,8 @@ async function ensureMap() {
   L.circleMarker(IND, { radius: 9, color: "#475569", fillColor: "#64748b", fillOpacity: 0.9 })
     .bindTooltip("Calvert City Industrial Complex (Source)").addTo(map);
   APP._mapState.map = map;
-  APP._mapState.geojson = await loadJSON("calvert_zips.geojson");
+  APP._map = map;  // alias for geolocation handler
+  APP._mapState.geojson = await loadJSON("calvert_areas.geojson");
 }
 
 function renderMap() {
@@ -166,17 +172,20 @@ function renderMap() {
   var feats = APP.forecast.features[date] || {};
   ms.geo = L.geoJSON(ms.geojson, {
     style: function (f) {
-      var cell = feats[f.properties.zip];
+      var locId = f.properties.GEOID || f.properties.zip || f.properties.ZCTA5CE10 || "";
+      var cell = feats[locId];
       if (!cell) return { color: "#94a3b8", weight: 1, fillColor: "#cbd5e1", fillOpacity: 0.2 };
       var tier = OdorModel.getRiskTier(APP.oriFor(cell));
       return { color: "#475569", weight: 1.5, fillColor: "rgb(" + tier.rgb.join(",") + ")", fillOpacity: 0.45 };
     },
     onEachFeature: function (f, layer) {
-      var cell = feats[f.properties.zip];
+      var locId = f.properties.GEOID || f.properties.zip || f.properties.ZCTA5CE10 || "";
+      var cell = feats[locId];
       var ori = cell ? APP.oriFor(cell) : null;
       var tier = cell ? OdorModel.getRiskTier(ori) : { label: "N/A" };
+      var displayName = f.properties.display_name || f.properties.NAME || locId;
       layer.bindTooltip(
-        "ZIP " + f.properties.zip + "<br>ORI: " +
+        "Area: " + displayName + "<br>ORI: " +
         (ori === null ? "N/A" : ori.toFixed(1) + "%") + "<br>" + tier.label
       );
     },
@@ -194,7 +203,8 @@ function renderMonthly() {
       '<div id="calendar" class="calendar-grid"></div>';
     var sel = panel.querySelector("#monthly-loc");
     APP.historical.locations.forEach(function (l) {
-      var o = document.createElement("option"); o.value = l.zip; o.textContent = l.zip + " — " + l.name;
+      var locId = l.id || l.zip;
+      var o = document.createElement("option"); o.value = locId; o.textContent = locId + " — " + l.name;
       sel.appendChild(o);
     });
     sel.addEventListener("change", renderMonthly);
@@ -231,13 +241,16 @@ function renderMonthly() {
 // ── Report tab ────────────────────────────────────────────────────────────────
 
 function buildFormUrl(lat, lon) {
-  var f = window.GOOGLE_FORM;
-  var u = new URL(f.viewUrl);
+  var cfg = window.GOOGLE_FORM;
+  var u = new URL(cfg.viewUrl);
   if (lat != null && lon != null) {
-    u.searchParams.set(f.latEntry, lat.toFixed(6));
-    u.searchParams.set(f.lonEntry, lon.toFixed(6));
+    u.searchParams.set(cfg.latEntry, lat.toFixed(6));
+    u.searchParams.set(cfg.lonEntry, lon.toFixed(6));
   }
-  return u.href;
+  if (cfg.tsEntry) {
+    u.searchParams.set(cfg.tsEntry, new Date().toISOString());
+  }
+  return u.toString();
 }
 
 function renderReportTab() {
@@ -276,6 +289,42 @@ function renderReportTab() {
   panel.querySelector("#btn-geo-skew").addEventListener("click", function () { openForm(true); });
 }
 
+// ── Map tab geolocation ───────────────────────────────────────────────────────
+
+function wireLocateMapButton() {
+  document.getElementById("btn-locate-map")?.addEventListener("click", function () {
+    if (!navigator.geolocation) { alert("Geolocation not supported."); return; }
+    navigator.geolocation.getCurrentPosition(function (pos) {
+      var lat = pos.coords.latitude, lon = pos.coords.longitude;
+      // Center the map
+      if (APP._map) APP._map.setView([lat, lon], 12);
+      // Add a marker
+      if (APP._userMarker) APP._map.removeLayer(APP._userMarker);
+      APP._userMarker = L.marker([lat, lon]).addTo(APP._map)
+        .bindPopup("Your location").openPopup();
+      // Find nearest location in today's data and show its ORI
+      var today = APP.forecast.dates[0];
+      var features = APP.forecast.features[today] || {};
+      var nearest = null, nearestDist = Infinity;
+      APP.forecast.locations.forEach(function (loc) {
+        var d = Math.hypot(loc.lat - lat, loc.lon - lon);
+        if (d < nearestDist) { nearestDist = d; nearest = loc; }
+      });
+      if (nearest) {
+        var locId = nearest.id || nearest.zip;
+        var cell = features[locId];
+        if (cell) {
+          var ori = APP.oriFor(cell);
+          var tier = OdorModel.getRiskTier(ori);
+          L.popup().setLatLng([lat, lon])
+            .setContent("<b>Nearest forecast area:</b> " + nearest.name + "<br><b>ORI: " + ori + "%</b> — " + tier.label)
+            .openOn(APP._map);
+        }
+      }
+    }, function () { alert("Could not get your location."); });
+  });
+}
+
 // ── Main bootstrap ────────────────────────────────────────────────────────────
 
 async function main() {
@@ -297,6 +346,7 @@ async function main() {
   wireControls();
 
   mapPanelScaffold();
+  wireLocateMapButton();
 
   document.querySelectorAll(".tab").forEach(function (t) {
     t.addEventListener("click", function () { setActiveTab(t.dataset.tab); });

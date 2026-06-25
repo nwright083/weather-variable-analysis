@@ -1,0 +1,66 @@
+{
+  "city": "Louisville",
+  "weather_only": {
+    "const": -80.32569642884462,
+    "temperature": 0.1624535648936195,
+    "temperature_squared": -0.0011646168089513066,
+    "solar_radiation": -0.0048587126618444346,
+    "relative_humidity": -0.0141690647534105,
+    "wind_speed": -0.10559218044327282,
+    "precipitation": -0.07268950496445487,
+    "diurnal_temperature_range": 0.02180924365142047,
+    "boundary_layer_height": 9.672140878585061e-05,
+    "atmospheric_pressure": 0.07385804401283101,
+    "dow_tue": -0.022582068042611005,
+    "dow_wed": 0.020079158797611855,
+    "dow_thu": -0.05569797618934958,
+    "dow_fri": -0.1258030765620452,
+    "dow_sat": -0.4109355121567428,
+    "dow_sun": -0.5898201794854467,
+    "is_holiday": -0.1459951837205922
+  },
+  "proximity_enhanced": {
+    "const": -11.793567991038794,
+    "temperature": 0.12456586782379611,
+    "temperature_squared": -0.0009093268489412867,
+    "solar_radiation": -0.004711164853423627,
+    "relative_humidity": -0.031594511187114184,
+    "wind_speed": -0.12119899644504743,
+    "precipitation": -0.18098106748931136,
+    "diurnal_temperature_range": 0.021875653612538994,
+    "boundary_layer_height": 1.6554274609012766e-05,
+    "atmospheric_pressure": -0.015682883383046593,
+    "dow_tue": -0.03137294634997868,
+    "dow_wed": -0.0013767309064260892,
+    "dow_thu": -0.06385785632352875,
+    "dow_fri": -0.1255258881922924,
+    "dow_sat": -0.42344185220391184,
+    "dow_sun": -0.6374771121266177,
+    "is_holiday": -0.15985427354629125,
+    "multi_source_exposure": 13.199812231882639,
+    "wind_align_weighted": 0.8847858548243704
+  },
+  "model_metrics": {
+    "weather_only_pseudo_r2": 0.046564061589803196,
+    "proximity_enhanced_pseudo_r2": 0.17513289662769094,
+    "weather_only_aic": 39927.12162204609,
+    "proximity_enhanced_aic": 34551.61790675339,
+    "delta_aic": 5375.503715292703,
+    "weather_only_cv_auc": 0.6743823426170025,
+    "proximity_enhanced_cv_auc": 0.8284536498328683,
+    "roc_auc_full_wa": 0.6759010172011963,
+    "roc_auc_full_pe": 0.8294842744206972
+  },
+  "proximity_feature_significance": {
+    "multi_source_exposure": {
+      "coef": 13.199812231882639,
+      "pvalue": 0.0,
+      "significant_p10": true
+    },
+    "wind_align_weighted": {
+      "coef": 0.8847858548243704,
+      "pvalue": 5.34860553622751e-28,
+      "significant_p10": true
+    }
+  }
+}

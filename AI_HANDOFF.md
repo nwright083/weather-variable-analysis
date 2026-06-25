@@ -197,7 +197,9 @@ A fully static daily-regenerated forecast website was built and deployed to GitH
 - Latitude entry: `entry.1224216756`, Longitude entry: `entry.1314282346`
 - Report tab has two one-click buttons: "📍 Use My Exact Location" and "🛡️ Use Approximate Location (Privacy)". Each button grabs `navigator.geolocation`, appends lat/lon as pre-fill query params, and immediately opens the form in a new tab — no separate "Open Form" button.
 
-**JSON cell keys** (used in both Python generator and JS): `aligned, temp, temp_sq, solar, rh, wind_speed, wind_dir, precip, dtr, blh, pressure`
+**JSON cell keys** (used in both Python generator and JS): `aligned, wind_alignment, distance, temp, temp_sq, solar, rh, wind_speed, wind_dir, precip, dtr, blh, pressure`
+- `wind_alignment` is the new **continuous cosine alignment factor (0–1)** replacing the binary `aligned` for the continuous-mode wind filter.
+- Locations are now **census tracts** (GEOID as key) instead of ZIP codes.
 
 **Map Layers scaffold:** Risk layer active; Plume and Reports layer checkboxes present but disabled (pending `docs/data/plume.json` and `docs/data/reports.json` — see FUTURE_IDEAS backlog item `1-PLUME`).
 
@@ -225,6 +227,46 @@ A fully static daily-regenerated forecast website was built and deployed to GitH
 * **Jupyter Notebook Integration**: Created and executed `scratch/append_spatial_analysis.py` (and updated via `scratch/update_spatial_analysis_to_002.py`) to append this new panel regression analysis block ("Section 5: Spatial Proximity & Multi-Source Distance Decay Analysis") comparing $k=0.03$ and $k=0.02$ to the end of all four Jupyter notebooks (`.ipynb` files) and their Python script equivalents (`.py` files) in `Pittsburgh Data/` and `Louisville Data/`.
 * **Sync Status**: Staged, committed, and pushed all updates to Gitea (`origin main`) and GitHub (`github main`).
 
+### 13. Proximity Features, Dual-Model Notebooks, Census Tracts & Frontend Overhaul (2026-06-24)
+
+#### Dual-Model Analysis Notebooks (Pittsburgh & Louisville)
+* **New files:** `Pittsburgh Data/Dual_Model_Proximity_Analysis.py` + `.ipynb`, `Louisville Data/Dual_Model_Proximity_Analysis.py` + `.ipynb`
+* **New feature: Continuous Wind Alignment Factor (0–1)** — cosine-based, replaces discrete 8-sector bins. Formula: `(1 + cos(wind_toward − bearing)) / 2` where `wind_toward = (wind_from + 180°) % 360`.
+* **New feature: Multi-Source Exposure** — `sum(exp(-0.02 * dist_src))` across all emitters (Rubbertown + JBS Swift for Louisville; Clairton + Edgar Thomson + Irvin Works for Pittsburgh).
+* **Screening results — both features p < 0.0001:**
+  * Pittsburgh: ΔAIC = −889, ΔPseudo-R² = +0.022, CV AUC 0.906 → 0.910
+  * Louisville: ΔAIC = −5,376, ΔPseudo-R² = +0.128, CV AUC 0.674 → 0.829
+* **Exported coefficients:** `Pittsburgh Data/model_coeffs_pittsburgh.json`, `Louisville Data/model_coeffs_louisville.json`
+
+#### New Prediction Mode: Pittsburgh Proximity-Enhanced
+* **`COEFFS_PITTSBURGH_PROXIMITY`** added to `odor_forecast_core.py` — trained Pittsburgh zip-day panel logit including `multi_source_exposure` and `wind_align_weighted` regression terms.
+* Exposed as `"pittsburgh_proximity"` mode in `generate_site.py` → `meta.json` → mode selector dropdown.
+* `predict_ori()` now applies proximity coefficients automatically when present in the coeff dict.
+* **Calibration note:** The `precipitation` coef is +6.66 (positive, vs −0.864 in city-level model) due to different aggregation level (zip-day panel vs. city-wide daily). This mode is experimental; compare against the existing modes.
+
+#### Calvert City Spatial Resolution: ZIP → Census Tracts
+* **New script:** `scratch/fetch_census_tracts.py` — downloads 2020 TIGER tracts for Marshall (10), McCracken (19), Livingston (3) counties via TIGERweb REST API (layer 6).
+* **New file:** `calvert_tracts.geojson` (repo root) — 32 census tract polygons with `GEOID` property.
+* `LOCATIONS` in `odor_forecast_core.py` replaced: 7 ZIP codes → 32 census tracts (key format: `"TRACT {GEOID} (…)"`).
+* `docs/calvert_areas.geojson` — the tracts file deployed to docs/ for Leaflet. Replaces `calvert_zips.geojson`.
+
+#### Continuous Wind Alignment in Core & Site
+* `compute_continuous_wind_alignment(wind_from_deg, bearing_deg)` added to `odor_forecast_core.py`.
+* Both fetch functions compute `wind_alignment` float column per row.
+* `predict_ori()` has `use_continuous_alignment` param; when True, interpolates log-odds multiplier between `wind_penalty` and `wind_boost` using alignment (0–1).
+* `generate_site.py` emits `wind_alignment` float in every JSON cell.
+* `docs/model.js` `computeOri()` branches on `opts.continuousAlignment` — continuous or discrete.
+
+#### Frontend Changes (docs/)
+* **`docs/index.html`**: Added `tsEntry: ""` to GOOGLE_FORM config (set to your form's timestamp entry ID), "Continuous Alignment" checkbox in Wind Corridor Filter group.
+* **`docs/app.js`**: `opts()` includes `continuousAlignment`; `renderMap()` uses GEOID key from `f.properties.GEOID`; "📍 Use My Location" button centers map + shows nearest tract ORI; `buildFormUrl()` injects ISO timestamp when `tsEntry` set; loads `calvert_areas.geojson`.
+* **`docs/style.css`**: Mobile-responsive `@media (max-width: 700px)` — sidebar stacks vertically, tabs scroll horizontally, map 320px, 2-col card grid; `.btn-locate` button style.
+
+#### Test Suite
+* `scratch/test_forecast_engine.py` — added `test_continuous_wind_alignment` (perfect/no/crosswind cases).
+* `scratch/test_generate_site.py` — updated assertions for GEOID-keyed locations, `wind_alignment` float in cell, and new `pittsburgh_proximity` mode in meta.
+* **All 9 tests pass** (1 skipped — JS parity, Node absent locally; runs in CI).
+
 ---
-*Last updated: 2026-06-23 by Antigravity — distance-decay default 0.02, multi-source panel regressions run, notebooks updated, and remotes synced*
+*Last updated: 2026-06-24 by Claude Sonnet — dual-model notebooks, census tracts, proximity mode, continuous wind alignment, mobile CSS, tests all passing*
 

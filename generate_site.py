@@ -17,9 +17,14 @@ def _location_directory():
     locs = []
     for name, info in core.LOCATIONS.items():
         lat, lon = info["coords"]
+        # Format: "TRACT {GEOID} ({Name})" or old "ZIP {code} ({Name})"
+        parts = name.split(" ", 2)
+        id_key = parts[1] if len(parts) > 1 else name
+        display_name = name.split("(")[1].rstrip(")").strip() if "(" in name else name
         locs.append({
-            "zip": name.split(" ")[1],
-            "name": name.split("(")[1].rstrip(")").strip() if "(" in name else name,
+            "id": id_key,    # GEOID (e.g. "21157950100") or ZIP code
+            "zip": id_key,   # keep "zip" key for backward compat
+            "name": display_name,
             "lat": lat, "lon": lon,
         })
     return locs
@@ -31,10 +36,25 @@ def build_feature_payload(df, dates_sorted):
         day = df[df["date"] == d]
         per_zip = {}
         for _, row in day.iterrows():
-            zip_code = row["location"].split(" ")[1]
+            loc_name = row["location"]
+            parts = loc_name.split(" ", 2)
+            loc_id = parts[1] if len(parts) > 1 else loc_name  # GEOID or ZIP
+
             aligned = core.check_wind_alignment(row["wind_direction"], row["location"])
-            per_zip[zip_code] = {
+
+            # Compute continuous wind alignment (use pre-computed column if available)
+            if "wind_alignment" in row and not (isinstance(row["wind_alignment"], float) and str(row["wind_alignment"]) == "nan"):
+                alignment = round(float(row["wind_alignment"]), 3)
+            elif "bearing_from_source" in row:
+                alignment = round(core.compute_continuous_wind_alignment(
+                    row["wind_direction"], row["bearing_from_source"]
+                ), 3)
+            else:
+                alignment = 0.5
+
+            per_zip[loc_id] = {
                 "aligned": bool(aligned),
+                "wind_alignment": alignment,
                 "distance": round(float(row["distance_from_source"]), 2),
                 "temp": round(float(row["temperature"]), 2),
                 "temp_sq": round(float(row["temperature_squared"]), 2),
@@ -71,13 +91,15 @@ def build_meta():
         "coeffs": {
             "estimated_calvert": core.COEFFS_EST_CALVERT,
             "exact_pittsburgh": core.COEFFS_PITTSBURGH,
+            "pittsburgh_proximity": core.COEFFS_PITTSBURGH_PROXIMITY,
         },
         "mode_labels": {
             "estimated_calvert": "Estimated Calvert City",
             "exact_pittsburgh": "Exact Pittsburgh Model",
+            "pittsburgh_proximity": "Pittsburgh Proximity-Enhanced",
         },
         "custom_slider_ranges": custom_ranges,
-        "wind_defaults": {"filter": True, "penalty_pct": 75, "boost": 1.0},
+        "wind_defaults": {"filter": True, "penalty_pct": 75, "boost": 1.0, "continuous_mode": True},
         "distance_defaults": {"enabled": True, "rate": 0.02},
     }
 
@@ -101,10 +123,13 @@ def main(output_dir=None):
     with open(os.path.join(output_dir, "meta.json"), "w") as fh:
         json.dump(build_meta(), fh, indent=2)
 
-    # Copy the ZIP boundary polygons next to index.html for Leaflet
-    src_geo = os.path.join(ROOT, "calvert_zips.geojson")
-    if os.path.exists(src_geo):
-        shutil.copy(src_geo, os.path.join(ROOT, "docs", "calvert_zips.geojson"))
+    # Copy tracts geojson (prefer tracts, fall back to zips)
+    for geo_name in ["calvert_tracts.geojson", "calvert_zips.geojson"]:
+        src_geo = os.path.join(ROOT, geo_name)
+        if os.path.exists(src_geo):
+            dst_name = "calvert_areas.geojson"
+            shutil.copy(src_geo, os.path.join(ROOT, "docs", dst_name))
+            break
 
     print(f"Wrote forecast ({len(f_dates)}d), historical ({len(h_dates)}d), meta to {output_dir}")
 

@@ -66,18 +66,27 @@
 
 ---
 
+## ✅ Completed (2026-06-24)
+
+### 6. Proximity Features, Dual-Model Notebooks, Census Tracts & Frontend Overhaul — Completed 2026-06-24
+**Scope:** All notebooks, `odor_forecast_core.py`, `generate_site.py`, `docs/`
+**What was done:**
+- **Continuous Wind Alignment Factor (0–1)**: Added `compute_continuous_wind_alignment` (cosine-based) to `odor_forecast_core.py`; replaces discrete 7-sector binary filter as default mode in the static site. Exposed via "Continuous Alignment" checkbox.
+- **Dual-Model Notebooks (Pittsburgh + Louisville)**: Created `Dual_Model_Proximity_Analysis.py` + `.ipynb` for both cities. Feature importance screening confirms both `multi_source_exposure` (ΔAIC: Pittsburgh −889, Louisville −5376) and `wind_align_weighted` are highly significant (p<0.0001). CV AUC improved from 0.674 → 0.829 in Louisville.
+- **Pittsburgh Proximity-Enhanced Mode**: `COEFFS_PITTSBURGH_PROXIMITY` added to `odor_forecast_core.py` and exposed in the site as a new dropdown mode. Proximity regression terms are integrated into `predict_ori()` and mirrored in `docs/model.js`.
+- **Census Tract Resolution**: `LOCATIONS` upgraded from 7 ZIP codes to 32 census tracts (Marshall/McCracken/Livingston counties) via `scratch/fetch_census_tracts.py`. `calvert_tracts.geojson` deployed as `docs/calvert_areas.geojson`.
+- **Frontend**: "Use My Location" button on Map tab (centers + shows nearest tract ORI); Google Form timestamp injection (`tsEntry` — set your form's entry ID in `window.GOOGLE_FORM`); mobile-responsive CSS (`@media max-width: 700px`).
+- **Tests**: All 9 pass (continuous alignment test added; schema test updated for tracts + `wind_alignment` cell key).
+
+**Pending user action**: Add a short-answer "Submission Timestamp" question to the Google Form and set `tsEntry` in `docs/index.html` `window.GOOGLE_FORM` config.
+
+---
+
 ## 🔧 In Progress
 
 ### Static Daily-Generated Forecast Website (GitHub Pages)
-**Scope:** New `odor_forecast_core.py`, `generate_site.py`, `docs/` static site, GitHub Actions cron.
-**Design doc:** `docs/superpowers/specs/2026-06-23-static-odor-forecast-site-design.md`
-- Extract pure forecasting logic from `calvert_odor_forecaster.py` into `odor_forecast_core.py` (no Streamlit).
-- `generate_site.py` fetches weather daily, writes raw model features + coefficients to `docs/data/*.json`.
-- Static `index.html` + `app.js` (Leaflet map, vanilla-JS tabs) compute ORI client-side, with live controls
-  for prediction mode (incl. Custom), wind filter, penalty %, and boost — mirroring the Streamlit sidebar.
-- Report tab uses browser geolocation to pre-fill a Google Form (lat/lon as query params).
-- GitHub Actions cron (`0 6 * * *`) regenerates JSON and deploys to GitHub Pages. Portable to a
-  university/home server via plain crontab later.
+**Status: LIVE** — deployed 2026-06-23. Extended and upgraded 2026-06-24 (see above).
+- All core features complete. GitHub Actions cron regenerates daily at 06:00 UTC.
 
 ---
 

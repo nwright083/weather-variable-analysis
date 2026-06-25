@@ -11,6 +11,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from odor_forecast_core import (
     predict_ori,
+    compute_continuous_wind_alignment,
     COEFFS_PITTSBURGH, COEFFS_EST_CALVERT, PRESSURE_ELEVATION_OFFSET
 )
 
@@ -273,6 +274,31 @@ class TestCalvertOdorForecaster(unittest.TestCase):
         z_expected = max(-60.0, min(60.0, z_expected))
         expected_ori = round(100.0 / (1.0 + math.exp(-z_expected)), 1)
         self.assertAlmostEqual(ori_far_decay, expected_ori, places=1)
+
+
+    def test_continuous_wind_alignment(self):
+        """compute_continuous_wind_alignment must return correct 0-to-1 cosine factor."""
+        # Perfect alignment: wind from south (180°), bearing north (0°)
+        # wind_toward = 180+180=360=0°, angle_diff = cos(0-0)=cos(0)=1, factor=(1+1)/2=1.0
+        self.assertAlmostEqual(
+            compute_continuous_wind_alignment(wind_from_deg=180, bearing_deg=0), 1.0, places=2
+        )
+        # No alignment: wind from north (0°), bearing north (0°)
+        # wind_toward = 0+180=180°, angle_diff = cos(180-0)=cos(π)=-1, factor=(1-1)/2=0.0
+        self.assertAlmostEqual(
+            compute_continuous_wind_alignment(wind_from_deg=0, bearing_deg=0), 0.0, places=2
+        )
+        # Crosswind: wind from west (270°), bearing north (0°)
+        # wind_toward = 270+180=450=90°, angle_diff = cos(90-0)=cos(π/2)=0, factor=(1+0)/2=0.5
+        self.assertAlmostEqual(
+            compute_continuous_wind_alignment(wind_from_deg=270, bearing_deg=0), 0.5, places=2
+        )
+        # Result must always be in [0, 1]
+        for wind in range(0, 360, 10):
+            for bearing in range(0, 360, 10):
+                val = compute_continuous_wind_alignment(wind, bearing)
+                self.assertGreaterEqual(val, 0.0)
+                self.assertLessEqual(val, 1.0)
 
 
 if __name__ == '__main__':
