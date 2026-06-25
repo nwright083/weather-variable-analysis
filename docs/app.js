@@ -615,6 +615,110 @@ function renderMethodsTab() {
     html += '</div>';
   });
 
+  // Validation section
+  var _mm = meta.model_metrics;
+  if (_mm && _mm.models) {
+    var _VP = {L:44, R:14, T:18, B:44, W:330, H:210};
+    var _vpw = _VP.W - _VP.L - _VP.R;
+    var _vph = _VP.H - _VP.T - _VP.B;
+    var _VC = {exact_pittsburgh:'#3b82f6', pittsburgh_proximity:'#16a34a', estimated_calvert:'#f59e0b'};
+    var _VN = {exact_pittsburgh:'Exact Pittsburgh', pittsburgh_proximity:'Proximity-Enhanced', estimated_calvert:'Est. Calvert City'};
+
+    function _vx(v) { return _VP.L + v * _vpw; }
+    function _vy(v) { return _VP.T + (1 - v) * _vph; }
+
+    function _vPath(xs, ys, color) {
+      var d = xs.map(function(x, i){ return (i ? 'L' : 'M') + ' ' + _vx(x).toFixed(1) + ' ' + _vy(ys[i]).toFixed(1); }).join(' ');
+      return '<path d="' + d + '" fill="none" stroke="' + color + '" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>';
+    }
+
+    function _vGrid(xLbl, yLbl) {
+      var g = '<rect x="' + _VP.L + '" y="' + _VP.T + '" width="' + _vpw + '" height="' + _vph + '" fill="#fafbfc" stroke="#cbd5e1" stroke-width="0.8"/>';
+      [0.2, 0.4, 0.6, 0.8].forEach(function(v) {
+        var lv = v.toFixed(1);
+        g += '<line x1="' + _vx(0) + '" y1="' + _vy(v).toFixed(1) + '" x2="' + _vx(1) + '" y2="' + _vy(v).toFixed(1) + '" stroke="#e2e8f0" stroke-width="0.7"/>';
+        g += '<line x1="' + _vx(v).toFixed(1) + '" y1="' + _vy(0) + '" x2="' + _vx(v).toFixed(1) + '" y2="' + _vy(1) + '" stroke="#e2e8f0" stroke-width="0.7"/>';
+        g += '<text x="' + (_vx(v) - 1).toFixed(1) + '" y="' + (_VP.T + _vph + 11) + '" font-size="7.5" text-anchor="middle" fill="#94a3b8">' + lv + '</text>';
+        g += '<text x="' + (_VP.L - 4) + '" y="' + (_vy(v) + 3).toFixed(1) + '" font-size="7.5" text-anchor="end" fill="#94a3b8">' + lv + '</text>';
+      });
+      g += '<text x="' + _vx(0).toFixed(1) + '" y="' + (_VP.T + _vph + 11) + '" font-size="7.5" text-anchor="middle" fill="#94a3b8">0</text>';
+      g += '<text x="' + _vx(1).toFixed(1) + '" y="' + (_VP.T + _vph + 11) + '" font-size="7.5" text-anchor="middle" fill="#94a3b8">1</text>';
+      g += '<text x="' + (_VP.L - 4) + '" y="' + (_vy(0) + 3).toFixed(1) + '" font-size="7.5" text-anchor="end" fill="#94a3b8">0</text>';
+      g += '<text x="' + (_VP.L - 4) + '" y="' + (_vy(1) + 3).toFixed(1) + '" font-size="7.5" text-anchor="end" fill="#94a3b8">1</text>';
+      g += '<text x="' + (_VP.L + _vpw / 2).toFixed(1) + '" y="' + (_VP.T + _vph + 28) + '" font-size="9" text-anchor="middle" fill="#64748b">' + xLbl + '</text>';
+      g += '<text transform="rotate(-90 ' + (_VP.L - 30) + ' ' + (_VP.T + _vph / 2).toFixed(1) + ')" x="' + (_VP.L - 30) + '" y="' + (_VP.T + _vph / 2).toFixed(1) + '" font-size="9" text-anchor="middle" fill="#64748b">' + yLbl + '</text>';
+      return g;
+    }
+
+    // ROC
+    var _rocSvg = '<svg viewBox="0 0 ' + _VP.W + ' ' + _VP.H + '" class="val-chart-svg">' + _vGrid('False Positive Rate', 'True Positive Rate');
+    _rocSvg += '<line x1="' + _vx(0).toFixed(1) + '" y1="' + _vy(0).toFixed(1) + '" x2="' + _vx(1).toFixed(1) + '" y2="' + _vy(1).toFixed(1) + '" stroke="#94a3b8" stroke-width="0.9" stroke-dasharray="4,3"/>';
+    ['exact_pittsburgh', 'pittsburgh_proximity', 'estimated_calvert'].forEach(function(mk) {
+      var m = _mm.models[mk]; if (!m || !m.fpr) return;
+      _rocSvg += _vPath(m.fpr, m.tpr, _VC[mk]);
+    });
+    _rocSvg += '<text x="' + (_VP.L + _vpw / 2).toFixed(1) + '" y="' + (_VP.T - 5) + '" font-size="10" text-anchor="middle" font-weight="600" fill="#0f172a">ROC Curve</text>';
+    _rocSvg += '</svg>';
+
+    // PR
+    var _prSvg = '<svg viewBox="0 0 ' + _VP.W + ' ' + _VP.H + '" class="val-chart-svg">' + _vGrid('Recall', 'Precision');
+    ['exact_pittsburgh', 'pittsburgh_proximity', 'estimated_calvert'].forEach(function(mk) {
+      var m = _mm.models[mk]; if (!m || !m.recall) return;
+      _prSvg += _vPath(m.recall, m.precision, _VC[mk]);
+      if (m.thr_opt !== undefined && m.recall.length) {
+        var bI = 0, bF = -1;
+        m.recall.forEach(function(r, i) { var f = 2 * m.precision[i] * r / (m.precision[i] + r + 1e-10); if (f > bF) { bF = f; bI = i; } });
+        _prSvg += '<circle cx="' + _vx(m.recall[bI]).toFixed(1) + '" cy="' + _vy(m.precision[bI]).toFixed(1) + '" r="3.5" fill="' + _VC[mk] + '" stroke="#fff" stroke-width="1.2"/>';
+      }
+    });
+    _prSvg += '<text x="' + (_VP.L + _vpw / 2).toFixed(1) + '" y="' + (_VP.T - 5) + '" font-size="10" text-anchor="middle" font-weight="600" fill="#0f172a">Precision-Recall Curve</text>';
+    _prSvg += '</svg>';
+
+    // Legend
+    var _legHtml = '<div class="val-legend">';
+    ['exact_pittsburgh', 'pittsburgh_proximity', 'estimated_calvert'].forEach(function(mk) {
+      var m = _mm.models[mk]; if (!m) return;
+      _legHtml += '<span class="val-legend-item"><span class="val-legend-dot" style="background:' + _VC[mk] + '"></span>' + _VN[mk] + ' (AUC ' + m.auc.toFixed(3) + ')</span>';
+    });
+    _legHtml += '</div>';
+
+    // Metrics table
+    var _tblHtml = '<table class="metrics-table"><thead><tr><th>Model</th><th>AUC</th><th>CV-AUC</th><th>Pseudo-R²</th><th>Evaluated on</th></tr></thead><tbody>';
+    var _tblDef = {
+      exact_pittsburgh:     {label:'Exact Pittsburgh',     basis:'Pittsburgh zip-day panel*'},
+      pittsburgh_proximity: {label:'Proximity-Enhanced',   basis:'Pittsburgh zip-day panel'},
+      estimated_calvert:    {label:'Est. Calvert City',    basis:'Pittsburgh panel (hand-tuned†)'},
+    };
+    ['exact_pittsburgh', 'pittsburgh_proximity', 'estimated_calvert'].forEach(function(mk) {
+      var m = _mm.models[mk], r = _tblDef[mk]; if (!m || !r) return;
+      _tblHtml += '<tr><td>' + r.label + '</td><td>' + m.auc.toFixed(3) + '</td><td>' + (m.cv_auc ? m.cv_auc.toFixed(3) : '—') + '</td><td>' + (m.pseudo_r2 ? m.pseudo_r2.toFixed(3) : '—') + '</td><td style="font-size:0.78rem;color:#475569">' + r.basis + '</td></tr>';
+    });
+    _tblHtml += '</tbody></table>';
+
+    html +=
+      '<div class="method-card">' +
+      '<h2>Model Validation &amp; Performance</h2>' +
+      '<div class="validation-charts">' +
+      '<div class="val-chart">' + _rocSvg + '</div>' +
+      '<div class="val-chart">' + _prSvg + '</div>' +
+      '</div>' +
+      _legHtml +
+      _tblHtml +
+      '<p style="font-size:0.8rem;color:#64748b;margin-top:0.7rem;">' +
+      '* <i>Exact Pittsburgh</i> is a daily city-wide model; evaluated here on the zip-day panel, so its AUC (0.76) reflects cross-zip discrimination only — on its native daily panel it achieves AUC 0.87.' +
+      '<br>† <i>Est. Calvert City</i> is hand-tuned for Calvert terrain (not re-fitted from data); no Calvert validation set exists yet, so curves show Pittsburgh panel performance only.' +
+      '</p>' +
+      '</div>';
+  }
+
+  // Data sources note + Copernicus attribution
+  html +=
+    '<div class="method-card" style="border-left:4px solid #0ea5e9;">' +
+    '<h2>Weather Data Sources</h2>' +
+    '<p style="margin-bottom:0.4rem;">The majority of weather data (temperature, humidity, wind, solar radiation, precipitation, pressure) comes from <b>Open-Meteo</b> — a free, open-source weather API that combines NWP forecast models with ERA5 historical reanalysis.</p>' +
+    '<p style="margin-bottom:0;">Boundary-layer height data for January–June 2024 was not available from Open-Meteo for that window. That gap was filled using <b>ERA5 reanalysis data from the Copernicus Climate Data Store (CDS)</b> — the European Centre for Medium-Range Weather Forecasts (ECMWF) global reanalysis at 0.25° resolution. The ERA5 values were matched to each Pittsburgh zip-code centroid using nearest-neighbor grid interpolation and converted from meters to feet.</p>' +
+    '</div>';
+
   // Custom + limitations
   html +=
     '<div class="method-card model-card">' +
@@ -635,8 +739,7 @@ function renderMethodsTab() {
     '<li>An <b>open question</b>: some residents report stronger odors after rain. The Pittsburgh data shows the ' +
     'opposite, so we keep rain as odor-suppressing for now and are collecting local reports to settle it.</li>' +
     '</ul>' +
-    '<p style="margin-bottom:0;font-size:0.85rem;color:#64748b;">Data: Open-Meteo (NWP forecasts + ERA5 reanalysis). ' +
-    'Forecasts regenerate daily.</p>' +
+    '<p style="margin-bottom:0;font-size:0.85rem;color:#64748b;">Forecasts regenerate daily from Open-Meteo NWP data. Training data spans 2018–2026.</p>' +
     '</div>';
 
   html += '</div>';

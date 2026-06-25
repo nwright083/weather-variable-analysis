@@ -14,3 +14,9 @@ scratch/
 
 # Generated forecast data (produced by generate_site.py / CI)
 docs/data/
+
+# Large training-data CSVs — stored in Gitea only (too large for GitHub LFS quota).
+# Re-generate: run fetch_weather_for_zips_pittsburgh.py + merge_smell_weather_pittsburgh.py
+# BLH backfill: Pittsburgh Data/backfill_blh_era5.py (requires ~/.cdsapirc)
+Pittsburgh Data/open-meteo-complete_hourly.csv
+Pittsburgh Data/open-meteo-smell-merged.csv

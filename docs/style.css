@@ -97,6 +97,19 @@ select { font-size:0.82rem; padding:0.25rem 0.4rem; border:1px solid #cbd5e1; bo
 .default-chip { display:inline-block; font-size:0.62rem; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; background:#2563eb; color:#fff; border-radius:4px; padding:0.12rem 0.4rem; vertical-align:middle; margin-left:0.4rem; }
 .method-card.limitations { border-left:4px solid #d97706; }
 
+/* Validation charts (Methodology tab) */
+.validation-charts { display: flex; gap: 0.75rem; margin-bottom: 0.6rem; }
+.val-chart { flex: 1 1 0; min-width: 0; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0.5rem; }
+.val-chart-svg { width: 100%; display: block; }
+.val-legend { display: flex; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
+.val-legend-item { display: flex; align-items: center; gap: 0.3rem; font-size: 0.78rem; color: #334155; }
+.val-legend-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.metrics-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; margin-bottom: 0.4rem; }
+.metrics-table th { text-align: left; padding: 0.3rem 0.5rem; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: #64748b; border-bottom: 2px solid #e2e8f0; }
+.metrics-table td { padding: 0.3rem 0.5rem; border-bottom: 1px solid #f1f5f9; color: #1e293b; }
+.metrics-table tr:last-child td { border-bottom: none; }
+@media (max-width: 700px) { .validation-charts { flex-direction: column; } }
+
 /* Hourly tab */
 .hourly-chart { width: 100%; display: block; }
 .hourly-chart-box { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0.75rem; margin-bottom: 0.6rem; }

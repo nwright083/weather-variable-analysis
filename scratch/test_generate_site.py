@@ -58,6 +58,24 @@ def test_build_meta_has_coeffs_and_offset():
     assert meta["coeffs"]["pittsburgh_proximity"]["multi_source_exposure"] == generate_site.core.COEFFS_PITTSBURGH_PROXIMITY["multi_source_exposure"]
 
 
+def test_build_meta_model_metrics():
+    meta = generate_site.build_meta()
+    # model_metrics present when model_metrics.json exists at repo root
+    import os
+    metrics_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "model_metrics.json")
+    if not os.path.exists(metrics_path):
+        return  # graceful no-op when file absent (e.g. CI without training data)
+    mm = meta.get("model_metrics")
+    assert mm is not None, "model_metrics missing from meta despite model_metrics.json existing"
+    assert "models" in mm
+    for model_key in ("exact_pittsburgh", "pittsburgh_proximity", "estimated_calvert"):
+        assert model_key in mm["models"], f"missing model key: {model_key}"
+        m = mm["models"][model_key]
+        assert "fpr" in m and "tpr" in m and "auc" in m, f"{model_key} missing curve arrays"
+        assert isinstance(m["fpr"], list) and len(m["fpr"]) > 5
+        assert 0.5 < m["auc"] <= 1.0, f"{model_key} AUC out of range: {m['auc']}"
+
+
 def _fake_hourly_df(dates):
     """Synthetic hourly DataFrame mirroring fetch_hourly_forecasts output schema."""
     rows = []

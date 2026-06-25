@@ -67,29 +67,29 @@ def _tract_id_from_location(location_name):
     return location_name.split(" ")[1]
 
 COEFFS_PITTSBURGH = {
-    'const': 17.415789,
-    'temperature': 0.114354,
-    'temperature_squared': -0.000476,
-    'solar_radiation': -0.013972,
-    'relative_humidity': -0.057838,
-    'wind_speed': -0.108479,
-    'precipitation': -0.864070,
-    'diurnal_temperature_range': 0.229181,
-    'boundary_layer_height': -0.000410,
-    'atmospheric_pressure': -0.017966,
+    'const': 3.559257,
+    'temperature': 0.127472,
+    'temperature_squared': -0.000564,
+    'solar_radiation': -0.016272,
+    'relative_humidity': -0.049634,
+    'wind_speed': -0.173865,
+    'precipitation': -0.908541,
+    'diurnal_temperature_range': 0.241257,
+    'boundary_layer_height': -0.000282,
+    'atmospheric_pressure': -0.005154,
 }
 
 COEFFS_EST_CALVERT = {
-    'const': 18.000000,
-    'temperature': 0.114354,
-    'temperature_squared': -0.000476,
-    'solar_radiation': -0.013972,
-    'relative_humidity': -0.057838,
-    'wind_speed': -0.150000,
-    'precipitation': -0.864070,
-    'diurnal_temperature_range': 0.229181,
-    'boundary_layer_height': -0.000600,
-    'atmospheric_pressure': -0.017966,
+    'const': 18.000000,             # manual offset for Calvert terrain
+    'temperature': 0.127472,
+    'temperature_squared': -0.000564,
+    'solar_radiation': -0.016272,
+    'relative_humidity': -0.049634,
+    'wind_speed': -0.150000,        # manual override (stronger rural sensitivity)
+    'precipitation': -0.908541,
+    'diurnal_temperature_range': 0.241257,
+    'boundary_layer_height': -0.000600,  # manual override (stronger rural sensitivity)
+    'atmospheric_pressure': -0.005154,
 }
 
 # Pittsburgh proximity-enhanced logit coefficients (zip-day panel, 2018-2026, 36 596 obs).
@@ -97,29 +97,29 @@ COEFFS_EST_CALVERT = {
 # Proximity terms are integrated regression coefficients, not post-hoc multipliers:
 #   multi_source_exposure: applied to exp(-0.02 * distance_from_source)  [single source for Calvert]
 #   wind_align_weighted:   applied to continuous cosine alignment factor (0–1)
-# ΔAIC vs weather-only = -889, ΔPseudo-R² = +0.022 (both features p < 0.0001).
+# ΔAIC vs weather-only = -956, ΔPseudo-R² = +0.020 (both features p < 0.0001).
 #
-# PRECIPITATION OVERRIDE: the raw zip-day panel fit produced precipitation = +6.65637, an
-# overfitting artifact (each inch of rain → ~780x odds, physically backwards — rain scavenges
-# odor). On heavy-rain days this term alone reached z = +20..+26, saturating ORI to 100%.
-# We override it with the empirically-validated city-wide Pittsburgh value (-0.864070), which
+# PRECIPITATION OVERRIDE: the raw zip-day panel fit produced precipitation = +6.25265, an
+# overfitting artifact (each inch of rain → ~510x odds, physically backwards — rain scavenges
+# odor). On heavy-rain days this term alone reached z = +14, saturating ORI to 100%.
+# We override it with the empirically-validated city-wide Pittsburgh value (-0.908541), which
 # is physically correct. This is SAFE: precip is 0 on most days, so dry-day baseline calibration
 # (the jointly-fit intercept) is untouched; only rainy-day behavior changes. Raw value preserved
 # in the notebooks / model_coeffs_pittsburgh.json.
-_PROX_PRECIP_RAW = 6.65637460426461  # raw zip-day panel fit (kept for reference, NOT used)
+_PROX_PRECIP_RAW = 6.252656147133751  # raw zip-day panel fit (kept for reference, NOT used)
 COEFFS_PITTSBURGH_PROXIMITY = {
-    'const': -12.666648271471834,
-    'temperature': 0.018343042144885864,
-    'temperature_squared': -0.00021423061641917800,
-    'solar_radiation': -0.0009207391359819757,
-    'relative_humidity': 0.004766342432915154,
-    'wind_speed': -0.04088000835814254,
-    'precipitation': -0.864070,  # overridden from +6.656 (see note above)
-    'diurnal_temperature_range': 0.23664438034852686,
-    'boundary_layer_height': -8.362886723254747e-05,
-    'atmospheric_pressure': 0.005515222566627884,
-    'multi_source_exposure': 1.3318487869144982,
-    'wind_align_weighted': 1.6800007018699348,
+    'const': -16.225190,
+    'temperature': 0.010511,
+    'temperature_squared': -0.000140,
+    'solar_radiation': -0.000990,
+    'relative_humidity': 0.003887,
+    'wind_speed': -0.044421,
+    'precipitation': -0.908541,  # overridden from +6.253 (see note above)
+    'diurnal_temperature_range': 0.243231,
+    'boundary_layer_height': -5.688525e-05,
+    'atmospheric_pressure': 0.008638,
+    'multi_source_exposure': 1.727589,
+    'wind_align_weighted': 1.377858,
 }
 
 # Calvert City Proximity-Enhanced: Calvert terrain-adjusted weather coefficients

@@ -382,5 +382,43 @@ A fully static daily-regenerated forecast website was built and deployed to GitH
 - All 11 tests pass, 1 skipped (unchanged).
 
 ---
-*Last updated: 2026-06-25 by Claude Sonnet 4.6 — hourly forecast tab, Google Form local-timezone timestamps, 11 tests passing*
+
+### 16. ERA5 BLH Backfill, Model Re-fit & Validation Charts (2026-06-25)
+
+#### Problem fixed: synthetic BLH in H1-2024 training data
+`Pittsburgh Data/open-meteo-complete_hourly.csv` was 100% null for `boundary_layer_height (ft)` across all 61 zip locations for exactly 2024-01-01 00:00 → 2024-06-30 23:00 (~266,448 rows, 5.9% of training data). The merge pipeline's 4-tier imputation was silently filling it with **month-hour median climatology** — smooth synthetic values with no day-to-day variability. This weakened the BLH signal in all three Pittsburgh-derived models.
+
+#### Fix: Copernicus CDS ERA5 reanalysis
+- `Pittsburgh Data/backfill_blh_era5.py`: fetches ERA5 `boundary_layer_height` from the Copernicus Climate Data Store for the H1-2024 gap, bounding box covering all 61 Pittsburgh zip centroids at 0.25° resolution. CDS credentials go in `~/.cdsapirc` (owner-read-only, **never in the repo**). ERA5 time is UTC and matches the raw CSV's UTC time column — direct join on `(location_id, time)`. Converts meters → feet. Downloads ~447 KB NetCDF, produces tidy `[location_id, time, blh_ft]` CSV (266,448 rows) in the session scratchpad.
+- The raw hourly CSV is patched in-place (backup in scratchpad). **Verify**: 0 null BLH in window after patch; sanity sample shows realistic diurnal range (e.g. 303 ft overnight → 3,436 ft afternoon on 2024-03-15).
+
+#### Model re-fit
+- Re-ran `merge_smell_weather_pittsburgh.py` → rebuilt `open-meteo-smell-merged.csv` with real H1-2024 BLH.
+- Re-ran `Odor_Complaint_Analysis_v2_debiased.py` → new `exact_pittsburgh` coefficients. AUC 0.8745 → 0.8694 (−0.5%, essentially unchanged). Pseudo-R² 0.387 → 0.337 (slightly lower — real BLH is noisier than synthetic medians, harder to fit but more honest).
+- Re-ran `Dual_Model_Proximity_Analysis.py` → new `pittsburgh_proximity` coefficients + updated `model_coeffs_pittsburgh.json`. AUC 0.9099 → 0.9053.
+- **Key coefficient changes**: BLH coefficient ~31% weaker in both models (expected — real variance vs smooth synthetic values). Precipitation stayed correctly negative. Wind speed strengthened (~60% in exact_pittsburgh).
+- `odor_forecast_core.py`: updated `COEFFS_PITTSBURGH`, `COEFFS_PITTSBURGH_PROXIMITY`, `COEFFS_EST_CALVERT` (same manual deltas re-applied: const→18.0, wind_speed→−0.15, BLH→−0.0006). `_PROX_PRECIP_RAW` updated from 6.656 → 6.253; precipitation override updated to −0.908541 (new exact_pittsburgh value).
+
+#### Model validation section (Methodology tab)
+- `Dual_Model_Proximity_Analysis.py` Section 7: exports committed `model_metrics.json` (repo root) with 100-pt ROC + PR curve arrays, AUC, CV-AUC, pseudo-R², and optimal-F1 for all three models.
+- `generate_site.py` `build_meta()`: reads `model_metrics.json` → `meta["model_metrics"]`; graceful no-op if absent (CI has no training data).
+- `docs/app.js` `renderMethodsTab()`: new "Model Validation & Performance" section renders:
+  - **Overlaid ROC SVG** (blue=Exact Pittsburgh, green=Proximity-Enhanced, amber=Est. Calvert City) + 45° chance diagonal.
+  - **Overlaid PR SVG** with optimal-F1 dots.
+  - **Metrics table**: AUC · CV-AUC · Pseudo-R² · evaluated-on.
+  - Caption footnotes: exact_pittsburgh AUC is 0.76 on the zip-day panel (its native daily-panel AUC is 0.87); estimated_calvert is hand-tuned with no Calvert validation set.
+- New **Weather Data Sources** card explains Open-Meteo (main) + Copernicus ERA5/CDS (BLH Jan–Jun 2024 gap).
+- `docs/style.css`: `.validation-charts`, `.val-chart`, `.val-chart-svg`, `.val-legend*`, `.metrics-table` added.
+- `scratch/test_generate_site.py`: `test_build_meta_model_metrics()` added — verifies curve arrays and AUC range; skips gracefully when `model_metrics.json` absent.
+- `scratch/test_forecast_engine.py`: updated test inputs for `test_wind_direction_filter` and `test_distance_decay` to use higher solar/BLH inputs that produce moderate ORI (not saturated at 100%) with the new coefficients.
+- **13/13 tests pass.**
+
+#### LFS / git note
+The two large Pittsburgh CSVs are git LFS tracked in Gitea (`origin`). Push to GitHub (`github` remote) with `GIT_LFS_SKIP_PUSH=1 git push github main` — GitHub only needs the code and committed artifacts (JSON, scripts, docs); the training CSVs are not needed for the forecaster.
+
+#### Security
+The CDS API key was used to fetch ERA5 data and stored **only** in `~/.cdsapirc`. It was never written to any tracked file or commit. The user should rotate it at [cds.climate.copernicus.eu](https://cds.climate.copernicus.eu) after this session.
+
+---
+*Last updated: 2026-06-25 by Claude Sonnet 4.6 — ERA5 BLH backfill, model re-fit, validation charts, 13 tests passing*
 

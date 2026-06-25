@@ -150,7 +150,7 @@ def build_meta():
         mode_labels["calvert_fitted"] = label
         default_mode = "calvert_fitted"  # prefer the data-fitted model once it exists
 
-    return {
+    meta = {
         "generated_utc": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "source": "Open-Meteo (NWP + ERA5)",
         "pressure_offset": core.PRESSURE_ELEVATION_OFFSET,
@@ -162,6 +162,11 @@ def build_meta():
         "wind_defaults": {"filter": True, "penalty_pct": 75, "boost": 1.0, "continuous_mode": True},
         "distance_defaults": {"enabled": True, "rate": 0.02},
     }
+    metrics_path = os.path.join(ROOT, "model_metrics.json")
+    if os.path.exists(metrics_path):
+        with open(metrics_path) as f:
+            meta["model_metrics"] = json.load(f)
+    return meta
 
 
 def main(output_dir=None):

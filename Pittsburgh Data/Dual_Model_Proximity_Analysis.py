@@ -618,6 +618,128 @@ print(f"    wind_align_weighted  : {coeffs_pe.get('wind_align_weighted',   'N/A'
 print(f"\n  ΔPseudo-R²  (B − A) : {delta_r2:+.4f}")
 print(f"  ΔAIC        (A − B) : {delta_aic:+.1f}  (positive = Model B better)")
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECTION 7 – EXPORT MODEL VALIDATION METRICS (ROC / PR curves + stats)
+# Written to model_metrics.json at repo root for the methodology dashboard tab.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+import sys as _sys
+import os as _os
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+import odor_forecast_core as _core
+
+from sklearn.metrics import precision_recall_curve
+
+print("\n" + "=" * 70)
+print("SECTION 7 – Export Model Validation Metrics → model_metrics.json")
+print("=" * 70)
+
+_weather_core = [
+    "temperature", "temperature_squared", "solar_radiation",
+    "relative_humidity", "wind_speed", "precipitation",
+    "diurnal_temperature_range", "boundary_layer_height", "atmospheric_pressure",
+]
+
+def _linear_pred(df, coeffs):
+    """Compute debiased log-odds for a panel DataFrame using the given coeff dict."""
+    z = coeffs["const"]
+    for v in _weather_core:
+        if v in df.columns and v in coeffs:
+            z = z + coeffs[v] * df[v]
+    # Proximity terms (only present in pittsburgh_proximity)
+    for v in ("multi_source_exposure", "wind_align_weighted"):
+        if v in df.columns and v in coeffs:
+            z = z + coeffs[v] * df[v]
+    return z
+
+def _downsample(arr, n=100):
+    arr = list(arr)
+    if len(arr) <= n:
+        return [round(float(x), 5) for x in arr]
+    idx = [int(round(i * (len(arr) - 1) / (n - 1))) for i in range(n)]
+    seen = set()
+    result = []
+    for i in idx:
+        if i not in seen:
+            seen.add(i)
+            result.append(round(float(arr[i]), 5))
+    return result
+
+def _curve_data(y_true, y_prob, pseudo_r2_val=None, cv_auc_val=None, note=None):
+    fpr, tpr, _ = roc_curve(y_true, y_prob)
+    auc_val = float(roc_auc_score(y_true, y_prob))
+    prec, rec, thr = precision_recall_curve(y_true, y_prob)
+    # Optimal F1
+    f1s = 2 * prec * rec / (prec + rec + 1e-10)
+    best_i = int(np.argmax(f1s))
+    d = {
+        "fpr":        _downsample(fpr),
+        "tpr":        _downsample(tpr),
+        "auc":        round(auc_val, 4),
+        "precision":  _downsample(prec),
+        "recall":     _downsample(rec),
+        "f1_opt":     round(float(f1s[best_i]), 4),
+        "thr_opt":    round(float(thr[best_i]) if best_i < len(thr) else 0.5, 4),
+    }
+    if pseudo_r2_val is not None:
+        d["pseudo_r2"] = round(float(pseudo_r2_val), 4)
+    if cv_auc_val is not None:
+        d["cv_auc"] = round(float(cv_auc_val), 4)
+    if note:
+        d["note"] = note
+    return d
+
+_df = sub_full.copy()
+_y  = y_bin
+
+# Model A – pittsburgh_proximity (weather-only panel variant → maps to exact_pittsburgh)
+_z_ep   = _linear_pred(_df, _core.COEFFS_PITTSBURGH)
+_prob_ep = 1.0 / (1.0 + np.exp(-_z_ep.clip(-60, 60)))
+_ep_data = _curve_data(
+    _y, _prob_ep,
+    pseudo_r2_val=logit_weather_only.prsquared,
+    cv_auc_val=cv_auc_a if cv_auc_a is not None else None,
+    note="Daily city-wide model evaluated on zip-day panel (same discrimination, different granularity)",
+)
+
+# Model B – pittsburgh_proximity
+_z_pp   = _linear_pred(_df, _core.COEFFS_PITTSBURGH_PROXIMITY)
+_prob_pp = 1.0 / (1.0 + np.exp(-_z_pp.clip(-60, 60)))
+_pp_data = _curve_data(
+    _y, _prob_pp,
+    pseudo_r2_val=logit_proximity_enhanced.prsquared,
+    cv_auc_val=cv_auc_b if cv_auc_b is not None else None,
+)
+
+# Model C – estimated_calvert (hand-tuned; evaluated on Pittsburgh panel)
+_z_ec   = _linear_pred(_df, _core.COEFFS_EST_CALVERT)
+_prob_ec = 1.0 / (1.0 + np.exp(-_z_ec.clip(-60, 60)))
+_ec_data = _curve_data(
+    _y, _prob_ec,
+    note="Hand-tuned for Calvert City terrain; evaluated on Pittsburgh panel only (no Calvert validation set exists yet)",
+)
+
+_n_obs   = int(len(_y))
+_ev_rate = round(float(_y.mean() * 100), 1)
+
+metrics_output = {
+    "validation_data": f"Pittsburgh zip-day panel (N={_n_obs:,}, event rate {_ev_rate}%)",
+    "models": {
+        "exact_pittsburgh":     _ep_data,
+        "pittsburgh_proximity": _pp_data,
+        "estimated_calvert":    _ec_data,
+    },
+}
+
+metrics_path = "model_metrics.json"
+with open(metrics_path, "w") as _f:
+    json.dump(metrics_output, _f, indent=2)
+
+print(f"  Saved {metrics_path}")
+print(f"  exact_pittsburgh     AUC={_ep_data['auc']:.4f}  pseudo-R²={_ep_data.get('pseudo_r2','N/A')}")
+print(f"  pittsburgh_proximity AUC={_pp_data['auc']:.4f}  pseudo-R²={_pp_data.get('pseudo_r2','N/A')}")
+print(f"  estimated_calvert    AUC={_ec_data['auc']:.4f}  (hand-tuned; Pittsburgh eval only)")
+
 print("\n" + "=" * 70)
 print("ALL SECTIONS COMPLETE")
 print("=" * 70)

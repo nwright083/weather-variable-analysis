@@ -177,13 +177,13 @@ class TestCalvertOdorForecaster(unittest.TestCase):
         mock_row_aligned = pd.Series({
             'temperature': 65.0,
             'temperature_squared': 65.0 ** 2,
-            'solar_radiation': 200.0,
-            'relative_humidity': 60.0,
+            'solar_radiation': 900.0,    # higher solar → lower ORI to avoid saturation
+            'relative_humidity': 70.0,
             'wind_speed': 2.0,
             'precipitation': 0.0,
-            'diurnal_temperature_range': 25.0,
-            'boundary_layer_height': 800.0,
-            'atmospheric_pressure': 1013.0,
+            'diurnal_temperature_range': 10.0,
+            'boundary_layer_height': 5000.0,  # high BLH → lower ORI, avoids saturation
+            'atmospheric_pressure': 1010.0,
             'wind_direction': 20.0,       # NNE — aligned with bearing_from_source=200
             'bearing_from_source': 200.0,
         })
@@ -223,15 +223,15 @@ class TestCalvertOdorForecaster(unittest.TestCase):
     def test_distance_decay(self):
         """Verify that distance decay reduces the calculated ORI as distance increases."""
         mock_row_close = pd.Series({
-            'temperature': 70.0,
-            'temperature_squared': 70.0 ** 2,
-            'solar_radiation': 200.0,
-            'relative_humidity': 60.0,
+            'temperature': 65.0,
+            'temperature_squared': 65.0 ** 2,
+            'solar_radiation': 900.0,    # higher solar → lower ORI to avoid saturation
+            'relative_humidity': 70.0,
             'wind_speed': 3.0,
             'precipitation': 0.0,
-            'diurnal_temperature_range': 15.0,
-            'boundary_layer_height': 1200.0,
-            'atmospheric_pressure': 1013.0,
+            'diurnal_temperature_range': 10.0,
+            'boundary_layer_height': 5000.0,  # high BLH → lower ORI, avoids saturation
+            'atmospheric_pressure': 1010.0,
             'wind_direction': 20.0,
             'bearing_from_source': 200.0,
             'latitude': 37.0317,
