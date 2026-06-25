@@ -96,8 +96,15 @@ COEFFS_EST_CALVERT = {
 #   multi_source_exposure: applied to exp(-0.02 * distance_from_source)  [single source for Calvert]
 #   wind_align_weighted:   applied to continuous cosine alignment factor (0–1)
 # ΔAIC vs weather-only = -889, ΔPseudo-R² = +0.022 (both features p < 0.0001).
-# NOTE: The precipitation term is positive here because this model was trained on zip-level panel
-# data (not city-wide daily), capturing local microclimatic correlations. Use with awareness.
+#
+# PRECIPITATION OVERRIDE: the raw zip-day panel fit produced precipitation = +6.65637, an
+# overfitting artifact (each inch of rain → ~780x odds, physically backwards — rain scavenges
+# odor). On heavy-rain days this term alone reached z = +20..+26, saturating ORI to 100%.
+# We override it with the empirically-validated city-wide Pittsburgh value (-0.864070), which
+# is physically correct. This is SAFE: precip is 0 on most days, so dry-day baseline calibration
+# (the jointly-fit intercept) is untouched; only rainy-day behavior changes. Raw value preserved
+# in the notebooks / model_coeffs_pittsburgh.json.
+_PROX_PRECIP_RAW = 6.65637460426461  # raw zip-day panel fit (kept for reference, NOT used)
 COEFFS_PITTSBURGH_PROXIMITY = {
     'const': -12.666648271471834,
     'temperature': 0.018343042144885864,
@@ -105,7 +112,7 @@ COEFFS_PITTSBURGH_PROXIMITY = {
     'solar_radiation': -0.0009207391359819757,
     'relative_humidity': 0.004766342432915154,
     'wind_speed': -0.04088000835814254,
-    'precipitation': 6.65637460426461,
+    'precipitation': -0.864070,  # overridden from +6.656 (see note above)
     'diurnal_temperature_range': 0.23664438034852686,
     'boundary_layer_height': -8.362886723254747e-05,
     'atmospheric_pressure': 0.005515222566627884,
