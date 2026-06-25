@@ -79,6 +79,24 @@ select { font-size:0.82rem; padding:0.25rem 0.4rem; border:1px solid #cbd5e1; bo
 .cc-section-head { font-size: 0.64rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.07em; margin: 0.75rem 0 0.25rem; padding-top: 0.5rem; border-top: 1px solid #e2e8f0; }
 .custom-coeffs .cc-section-head:first-child { border-top: none; margin-top: 0.25rem; }
 
+/* Methodology tab */
+.methods-wrap { max-width: 820px; }
+.method-card { background:#fff; border:1px solid #e2e8f0; border-radius:10px; padding:1.1rem 1.3rem; margin-bottom:1rem; }
+.method-card h2 { margin:0 0 0.6rem; font-size:1.05rem; font-weight:700; color:#0f172a; }
+.method-card h3 { margin:0 0 0.3rem; font-size:0.98rem; font-weight:700; color:#0f172a; }
+.method-card p { font-size:0.9rem; line-height:1.5; color:#334155; margin:0 0 0.7rem; }
+.method-card ul { font-size:0.88rem; line-height:1.5; color:#334155; margin:0 0 0.5rem; padding-left:1.2rem; }
+.method-card li { margin-bottom:0.35rem; }
+.tier-row { display:flex; flex-wrap:wrap; gap:0.4rem; margin-top:0.7rem; }
+.model-card { border-left:4px solid #2563eb; }
+.model-card .tagline { font-weight:600; color:#1e293b; font-size:0.92rem; margin-bottom:0.6rem; }
+.model-card .m-label { font-weight:700; color:#475569; font-size:0.82rem; text-transform:uppercase; letter-spacing:0.03em; }
+.model-card .m-notes { margin-top:0.2rem; }
+.model-card .m-best { font-size:0.86rem; color:#1d4ed8; background:#eff6ff; border-radius:6px; padding:0.45rem 0.7rem; margin-bottom:0; }
+.model-card .fitted-stats { font-size:0.85rem; color:#166534; background:#f0fdf4; border-radius:6px; padding:0.4rem 0.7rem; }
+.default-chip { display:inline-block; font-size:0.62rem; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; background:#2563eb; color:#fff; border-radius:4px; padding:0.12rem 0.4rem; vertical-align:middle; margin-left:0.4rem; }
+.method-card.limitations { border-left:4px solid #d97706; }
+
 /* Locate button */
 .btn-locate {
   display: inline-block;

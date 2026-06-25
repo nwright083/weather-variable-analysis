@@ -91,6 +91,7 @@
 - **Precipitation coefficient fix:** Raw zip-day panel fit produced `precipitation=+6.66` (overfitting artifact — rain inflated ORI to 100% on heavy-rain days). Overridden with city-wide validated value of `−0.864070`. Preserves dry-day calibration entirely (precip=0 on most days). Raw value stored as `_PROX_PRECIP_RAW`. Result: zero days at ~100%, max ORI dropped from 100% to ~45%.
 - **Sidebar simplified:** Removed Spatial & Dispersion section (wind filter, continuous alignment, distance decay checkboxes) from sidebar. Preset modes use `windFilter=false`, `distanceDecay=false` — proximity regression terms handle spatial adjustment natively. Toggles only active in Custom mode via Spatial Adjustments sliders.
 - **Mini-maps on 16-Day & 30-Day tabs:** Replaced `<select>` dropdowns with lazy-initialized Leaflet mini-maps (200px) that color tracts by ORI, support click-to-select, and include a "My Location" geolocation button.
+- **Methodology tab:** New `📖 Methodology` tab explaining ORI + risk tiers, the shared physical drivers (DTR/BLH inversion physics), the pressure-offset and de-biasing corrections, and a per-model card for each prediction mode (auto-generated from `meta.mode_labels`, so it stays in sync — including the data-fitted model when installed). Includes a limitations section. Prose lives in the `MODE_DOCS` object in `docs/app.js`.
 
 ### 8. Calvert City Report → Coefficient Analyzer & Model Installer — Completed 2026-06-25
 **Scope:** `analyze_calvert_reports.py` (new), `odor_forecast_core.py`, `generate_site.py`

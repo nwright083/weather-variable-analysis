@@ -327,6 +327,12 @@ A fully static daily-regenerated forecast website was built and deployed to GitH
   .venv/bin/python analyze_calvert_reports.py --yes                    # auto-install if gates pass
   ```
 
+#### Methodology Tab (new 5th tab)
+* **`docs/index.html`** — added `📖 Methodology` tab button + `#tab-methods` panel.
+* **`docs/app.js`** — `renderMethodsTab()` (lazy-built, `dataset.built` guard) wired into `APP._onTab`. Explains: what ORI is + risk tiers, the shared physical drivers (DTR/BLH/wind = inversion physics), the two corrections (pressure offset + de-biasing), and a per-model card for every mode in `meta.mode_labels`.
+* **`MODE_DOCS`** object in `app.js` holds the hand-written per-model prose (tagline, training data, how it works, notes, best-use), keyed by mode id. Modes present in meta but missing from MODE_DOCS fall back to a generic line, so future modes (e.g. `calvert_fitted`) render automatically — `calvert_fitted` has its own entry and surfaces `fitted_meta` (n_reports, CV AUC). Cards are data-driven from `meta.mode_labels`/`meta.default_mode`, so the page always matches the deployed models. Closes with a limitations section (Pittsburgh-borrowed, trapping-not-emissions, post-rain open question).
+* **`docs/style.css`** — `.methods-wrap`, `.method-card`, `.model-card`, `.tier-row`, `.default-chip`, etc.
+
 #### Open Scientific Question: Calvert Post-Rain Odor
 * Calvert City residents reported strong odors **after rain**. Pittsburgh data shows the opposite (rain → fewer complaints, even lagged, Poisson p≈10⁻⁴²). Hypothesis: different source chemistry (chemical plants vs coke/steel) may genuinely produce different precipitation response.
 * **Decision (Plan A+C):** Keep `precipitation = −0.864` (physically correct for our only real dataset); collect Calvert data with `analyze_calvert_reports.py` to settle empirically. The analyzer includes `precipitation_lag1` as an exploratory feature specifically to test the residents' claim.

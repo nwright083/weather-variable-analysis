@@ -466,6 +466,167 @@ function renderReportTab() {
   panel.querySelector("#btn-geo-skew").addEventListener("click", function () { openForm(true); });
 }
 
+// ── Methodology tab ───────────────────────────────────────────────────────────
+
+// Hand-written explanations keyed by mode id. Kept here (not in meta.json) so the
+// prose stays editable without touching the data pipeline. Any mode present in
+// meta.mode_labels but missing here falls back to a generic description.
+var MODE_DOCS = {
+  pittsburgh_proximity: {
+    tagline: "Default. The only model aware of your location and the wind direction.",
+    data: "Pittsburgh zip-day panel — ~36,600 observations (every ZIP × every day), 2018–2026, logistic regression.",
+    how: "Beyond weather, it adds two spatial terms fitted in the same regression: <b>source proximity</b> " +
+      "(risk decays with distance from the Calvert City industrial complex) and <b>continuous wind alignment</b> " +
+      "(higher risk when the wind is actually carrying air from the source toward you). This is why the map " +
+      "shows different risk for different tracts on the same day.",
+    notes: [
+      "Debiased: day-of-week and holiday <i>reporting</i> habits are removed so only weather/physics drive the score.",
+      "Precipitation was corrected to −0.864 (the raw panel fit had an overfitting artifact that forced rainy days to 100%).",
+      "Less sensitive to raw temperature than the Calvert/Pittsburgh daily models — once proximity, wind alignment, and the inversion signal (DTR) are accounted for, absolute warmth adds little.",
+    ],
+    best: "Best all-around choice: the only model with true spatial + wind-direction awareness.",
+  },
+  estimated_calvert: {
+    tagline: "Pittsburgh science, hand-tuned for Calvert's flat rural terrain.",
+    data: "Pittsburgh city-wide daily model, with coefficients manually adjusted using engineering judgment (not fitted to Calvert data).",
+    how: "Starts from the city-wide Pittsburgh daily model, then strengthens the <b>wind-speed</b> and " +
+      "<b>boundary-layer-height</b> sensitivities (open rural terrain disperses and mixes differently than a city " +
+      "valley) and raises the baseline. It has <b>no</b> proximity or wind-direction terms, so every tract gets the " +
+      "same score on a given day.",
+    notes: [
+      "Most temperature- and stagnation-sensitive of the models — it reacts strongly to warm, calm summer days with strong overnight inversions.",
+      "It carries the strongest boundary-layer-height sensitivity of any model (deliberately boosted for rural mixing).",
+      "Calibrated by judgment, not fit to local data — treat as an informed estimate.",
+    ],
+    best: "Use to see a Calvert-terrain-adjusted view, or to compare against the proximity model.",
+  },
+  exact_pittsburgh: {
+    tagline: "The unmodified Pittsburgh model — a reference baseline.",
+    data: "Pittsburgh city-wide daily logistic regression, used exactly as trained.",
+    how: "The raw Pittsburgh science applied to Calvert weather with no terrain adjustment and no proximity terms. " +
+      "Only the elevation pressure-offset correction is applied.",
+    notes: [
+      "Same temperature/DTR sensitivity as Estimated Calvert, but without the rural wind/mixing boosts.",
+      "Useful as a 'what does the original model say, untouched?' reference.",
+    ],
+    best: "Reference/comparison baseline.",
+  },
+  calvert_fitted: {
+    tagline: "Fitted directly from real Calvert City odor reports.",
+    data: "Local Calvert reports (tester logs and/or the public form), fitted by analyze_calvert_reports.py.",
+    how: "The only model trained on actual Calvert data. It learns which conditions precede real reported odors " +
+      "here, rather than borrowing from another city. Severity (1–5) is used to weight stronger smells more.",
+    notes: [
+      "Installed only after it beats the Pittsburgh model on cross-validated accuracy and clears minimum-report gates.",
+      "Improves as more reports are collected.",
+    ],
+    best: "Once enough local reports exist, this is the most Calvert-specific model available.",
+  },
+};
+
+function renderMethodsTab() {
+  var panel = document.getElementById("tab-methods");
+  if (panel.dataset.built) return;
+  panel.dataset.built = "1";
+
+  var meta = APP.meta;
+  var fitted = meta.fitted_meta || null;
+
+  var html = '<div class="methods-wrap">';
+
+  // Intro — what the number means
+  html +=
+    '<div class="method-card">' +
+    '<h2>How these forecasts work</h2>' +
+    '<p>Every forecast is an <b>Odor Risk Index (ORI)</b> — the estimated probability (0–100%) of a ' +
+    'community-wide <b>odor-trapping</b> event on that day. It is computed from weather using logistic ' +
+    'regression: the model combines the day\'s conditions into a score, then converts it to a probability.</p>' +
+    '<p style="margin-bottom:0;">It predicts when the <b>atmosphere will trap and concentrate</b> odor near the ground — ' +
+    'not whether the source is emitting. Risk tiers:</p>' +
+    '<div class="tier-row">' +
+    '<span class="badge-pill badge-clear">Clear / Low &lt; 15%</span>' +
+    '<span class="badge-pill badge-moderate">Moderate 15–30%</span>' +
+    '<span class="badge-pill badge-elevated">Elevated 30–50%</span>' +
+    '<span class="badge-pill badge-high">High ≥ 50%</span>' +
+    '</div></div>';
+
+  // Shared physics
+  html +=
+    '<div class="method-card">' +
+    '<h2>What drives the risk (all models)</h2>' +
+    '<p>All models read the same weather inputs. The strongest physical drivers of odor trapping are:</p>' +
+    '<ul>' +
+    '<li><b>Diurnal temperature range (DTR)</b> — a big day-to-night temperature swing means clear, calm nights and ' +
+    'strong overnight <b>temperature inversions</b> that trap air near the ground. The single most consistent driver.</li>' +
+    '<li><b>Boundary-layer height (BLH)</b> — how high the air mixes. A low mixing height keeps odor concentrated near ' +
+    'the surface. (DTR and BLH measure two sides of the same inversion physics.)</li>' +
+    '<li><b>Wind speed</b> — stronger wind disperses odor and lowers risk.</li>' +
+    '<li><b>Temperature, humidity, solar radiation, pressure, precipitation</b> — secondary modifiers.</li>' +
+    '</ul>' +
+    '<p style="margin-bottom:0;font-size:0.85rem;color:#64748b;">Two corrections apply to every model: an ' +
+    '<b>elevation pressure offset</b> (Pittsburgh sits ~250 m higher than Calvert, so pressures are shifted into the ' +
+    'training frame), and <b>de-biasing</b> (day-of-week and holiday <i>reporting</i> patterns are stripped out so the ' +
+    'score reflects weather, not when people happen to file reports).</p>' +
+    '</div>';
+
+  // Per-model cards
+  html += '<div class="method-card"><h2>The prediction models</h2>' +
+    '<p style="font-size:0.88rem;color:#475569;">They differ because they were trained on differently-shaped data. ' +
+    'Switch between them with the <b>Prediction Mode</b> selector on the left.</p></div>';
+
+  Object.keys(meta.mode_labels).forEach(function (id) {
+    var doc = MODE_DOCS[id];
+    var label = meta.mode_labels[id];
+    var isDefault = (id === meta.default_mode);
+    html += '<div class="method-card model-card">';
+    html += '<h3>' + label + (isDefault ? ' <span class="default-chip">default</span>' : '') + '</h3>';
+    if (!doc) {
+      html += '<p>' + (label) + ' — see project documentation for details.</p></div>';
+      return;
+    }
+    html += '<p class="tagline">' + doc.tagline + '</p>';
+    if (id === "calvert_fitted" && fitted) {
+      html += '<p class="fitted-stats">Fitted from <b>' + (fitted.n_reports || "?") + ' reports</b>' +
+        (fitted.cv_auc_candidate ? ' · cross-validated AUC ' + fitted.cv_auc_candidate +
+          ' (vs ' + (fitted.cv_auc_deployed || "?") + ' deployed)' : '') + '.</p>';
+    }
+    html += '<p><span class="m-label">Trained on:</span> ' + doc.data + '</p>';
+    html += '<p><span class="m-label">How it works:</span> ' + doc.how + '</p>';
+    html += '<ul class="m-notes">';
+    doc.notes.forEach(function (n) { html += '<li>' + n + '</li>'; });
+    html += '</ul>';
+    html += '<p class="m-best">' + doc.best + '</p>';
+    html += '</div>';
+  });
+
+  // Custom + limitations
+  html +=
+    '<div class="method-card model-card">' +
+    '<h3>Custom (manual)</h3>' +
+    '<p class="tagline">Tune every coefficient yourself.</p>' +
+    '<p>Exposes all model coefficients plus spatial adjustments (wind penalty/boost, distance decay) as sliders, ' +
+    'so you can explore how each weather variable changes the forecast.</p>' +
+    '</div>';
+
+  html +=
+    '<div class="method-card limitations">' +
+    '<h2>Important limitations</h2>' +
+    '<ul>' +
+    '<li>Most models are <b>borrowed from Pittsburgh</b>, whose odor sources (coke/steel) differ chemically from ' +
+    'Calvert\'s (chemical plants). The physics of atmospheric trapping transfers well; the exact source behavior may not.</li>' +
+    '<li>The model predicts <b>trapping conditions</b>, not emissions. A high-risk day with no emissions means no odor; ' +
+    'a low-risk day can still smell if there\'s a large release.</li>' +
+    '<li>An <b>open question</b>: some residents report stronger odors after rain. The Pittsburgh data shows the ' +
+    'opposite, so we keep rain as odor-suppressing for now and are collecting local reports to settle it.</li>' +
+    '</ul>' +
+    '<p style="margin-bottom:0;font-size:0.85rem;color:#64748b;">Data: Open-Meteo (NWP forecasts + ERA5 reanalysis). ' +
+    'Forecasts regenerate daily.</p>' +
+    '</div>';
+
+  html += '</div>';
+  panel.innerHTML = html;
+}
+
 // ── Map tab geolocation ───────────────────────────────────────────────────────
 
 function wireLocateMapButton() {
@@ -527,6 +688,7 @@ async function main() {
       setTimeout(function () { if (APP._locMaps.monthly) APP._locMaps.monthly.map.invalidateSize(); }, 50);
     }
     if (name === "report") { renderReportTab(); }
+    if (name === "methods") { renderMethodsTab(); }
   };
 
   APP.onChange(renderForecastGrid);
