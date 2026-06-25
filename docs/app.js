@@ -79,7 +79,7 @@ function buildModeSelect() {
   });
   var custom = document.createElement("option"); custom.value = "custom"; custom.textContent = "Custom (manual)";
   sel.appendChild(custom);
-  sel.value = APP.meta.default_mode || "calvert_proximity";
+  sel.value = APP.meta.default_mode || "pittsburgh_proximity";
 }
 
 function buildCustomCoeffSliders() {
