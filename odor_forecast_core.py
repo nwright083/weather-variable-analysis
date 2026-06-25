@@ -429,6 +429,170 @@ def fetch_forecasts(locations):
         return pd.concat(fallback_records, ignore_index=True), True
 
 
+def fetch_hourly_forecasts(locations):
+    """Return (df, is_mock) of per-hour rows for all locations over 16 forecast days.
+
+    Each row carries the same feature schema as daily feature cells — temp,
+    solar, rh, wind_speed/dir, precip, blh, pressure, dtr (parent-day max−min),
+    wind_alignment, aligned — plus datetime, date, hour, loc_id, and distance.
+    DTR is computed as daily max−min temperature and attached to all 24 hours of
+    each day so the existing ORI math (which expects dtr) works unchanged.
+    """
+    lats = [str(loc["coords"][0]) for loc in locations.values()]
+    lons = [str(loc["coords"][1]) for loc in locations.values()]
+    lat_param = ",".join(lats)
+    lon_param = ",".join(lons)
+
+    url = (
+        f"https://api.open-meteo.com/v1/forecast?"
+        f"latitude={lat_param}&longitude={lon_param}"
+        f"&hourly=temperature_2m,relative_humidity_2m,surface_pressure,wind_speed_10m,"
+        f"wind_direction_10m,rain,shortwave_radiation,boundary_layer_height"
+        f"&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch"
+        f"&forecast_days=16&timezone=America%2FChicago"
+    )
+
+    try:
+        response = requests.get(url, timeout=12)
+        response.raise_for_status()
+        res_data = response.json()
+        forecast_list = res_data if isinstance(res_data, list) else [res_data]
+
+        all_rows = []
+        for idx, (loc_name, loc_info) in enumerate(locations.items()):
+            loc_data = forecast_list[idx]
+            hourly = loc_data.get("hourly", {})
+            df = pd.DataFrame(hourly)
+            df['time'] = pd.to_datetime(df['time'])
+            df['date'] = df['time'].dt.strftime('%Y-%m-%d')
+            df['datetime'] = df['time'].dt.strftime('%Y-%m-%dT%H:%M')
+            df['hour'] = df['time'].dt.hour
+
+            # BLH: meters → feet
+            if 'boundary_layer_height' in df.columns:
+                df['boundary_layer_height'] = df['boundary_layer_height'] * 3.28084
+            else:
+                df['boundary_layer_height'] = 1500.0
+
+            # Parent-day DTR: daily max−min temperature, merged to all 24 hours
+            daily_dtr = (
+                df.groupby('date')['temperature_2m']
+                  .agg(lambda s: float(s.max() - s.min()))
+                  .rename('dtr')
+                  .reset_index()
+            )
+            df = df.merge(daily_dtr, on='date')
+
+            # Rename to match cell schema used by predict_ori / model.js
+            df = df.rename(columns={
+                'temperature_2m':      'temperature',
+                'relative_humidity_2m':'relative_humidity',
+                'surface_pressure':    'atmospheric_pressure',
+                'wind_speed_10m':      'wind_speed',
+                'wind_direction_10m':  'wind_direction',
+                'rain':                'precipitation',
+                'shortwave_radiation': 'solar_radiation',
+            })
+            df['temperature_squared'] = df['temperature'] ** 2
+
+            # Spatial constants for this tract
+            lat, lon = loc_info["coords"]
+            bearing  = calculate_bearing(lat, lon)
+            distance = calculate_distance(lat, lon)
+            parts    = loc_name.split(" ", 2)
+            loc_id   = parts[1] if len(parts) > 1 else loc_name
+
+            df['loc_id']              = loc_id
+            df['location']            = loc_name
+            df['distance_from_source'] = distance
+            df['bearing_from_source'] = bearing
+            df['wind_alignment'] = df['wind_direction'].apply(
+                lambda wd: compute_continuous_wind_alignment(wd, bearing)
+            )
+            df['aligned'] = df['wind_direction'].apply(
+                lambda wd: check_wind_alignment(wd, loc_name)
+            )
+
+            all_rows.append(df[[
+                'datetime', 'date', 'hour', 'loc_id', 'location',
+                'temperature', 'temperature_squared', 'solar_radiation',
+                'relative_humidity', 'wind_speed', 'wind_direction', 'precipitation',
+                'dtr', 'boundary_layer_height', 'atmospheric_pressure',
+                'distance_from_source', 'bearing_from_source', 'wind_alignment', 'aligned',
+            ]])
+
+        return pd.concat(all_rows, ignore_index=True), False
+
+    except Exception:
+        # Synthetic mock: plausible diurnal cycles per location/day
+        today = datetime.date.today()
+        all_rows = []
+        for loc_name, loc_info in locations.items():
+            seed = int(hashlib.md5(loc_name.encode()).hexdigest()[:8], 16) % 10000
+            rng = np.random.RandomState(seed)
+
+            day_temps  = rng.uniform(65.0, 88.0, 16)
+            day_dtrs   = rng.uniform(10.0, 22.0, 16)
+            day_rh     = rng.uniform(50.0, 82.0, 16)
+            day_press  = rng.uniform(1008.0, 1018.0, 16)
+            day_winds  = rng.uniform(1.5, 7.5, 16)
+            day_wdirs  = rng.uniform(0, 360, 16)
+            day_blh    = rng.choice([400.0, 900.0, 1800.0, 3000.0], size=16,
+                                    p=[0.15, 0.30, 0.40, 0.15])
+            day_rain   = rng.choice([0.0, 0.01, 0.05], size=16, p=[0.70, 0.20, 0.10])
+
+            lat, lon  = loc_info["coords"]
+            bearing   = calculate_bearing(lat, lon)
+            distance  = calculate_distance(lat, lon)
+            parts     = loc_name.split(" ", 2)
+            loc_id    = parts[1] if len(parts) > 1 else loc_name
+
+            rows = []
+            for day_i in range(16):
+                d_str  = (today + datetime.timedelta(days=day_i)).strftime('%Y-%m-%d')
+                t_mean = float(day_temps[day_i])
+                dtr    = float(day_dtrs[day_i])
+                for h in range(24):
+                    # Temperature: min ~6am, max ~3pm
+                    phase = (h - 6) / 24.0 * 2 * math.pi - math.pi / 2
+                    temp  = t_mean + (dtr / 2.0) * math.sin(phase)
+                    # Solar: 0 at night, bell curve peaking at noon
+                    solar = (max(0.0, 620.0 * math.sin(math.pi * (h - 6) / 14.0))
+                             if 6 <= h <= 20 else 0.0)
+                    # BLH: low overnight, peaks mid-afternoon
+                    blh_frac   = (max(0.08, math.sin(math.pi * (h - 7) / 14.0))
+                                  if 7 <= h <= 21 else 0.08)
+                    blh        = float(day_blh[day_i]) * blh_frac
+                    wind_speed = float(day_winds[day_i]) * (0.65 + 0.35 * blh_frac)
+                    wind_dir   = (float(day_wdirs[day_i]) + float(rng.uniform(-20.0, 20.0))) % 360.0
+                    rh_h       = float(day_rh[day_i]) + (4.0 if h < 9 or h > 20 else -2.0)
+                    precip_h   = float(day_rain[day_i]) / 24.0
+                    wind_align = compute_continuous_wind_alignment(wind_dir, bearing)
+                    aligned    = check_wind_alignment(wind_dir, loc_name)
+                    rows.append({
+                        'datetime': f"{d_str}T{h:02d}:00",
+                        'date': d_str, 'hour': h,
+                        'loc_id': loc_id, 'location': loc_name,
+                        'temperature': temp,
+                        'temperature_squared': temp ** 2,
+                        'solar_radiation': solar,
+                        'relative_humidity': rh_h,
+                        'wind_speed': wind_speed,
+                        'wind_direction': wind_dir,
+                        'precipitation': precip_h,
+                        'dtr': dtr,
+                        'boundary_layer_height': blh,
+                        'atmospheric_pressure': float(day_press[day_i]),
+                        'distance_from_source': distance,
+                        'bearing_from_source': bearing,
+                        'wind_alignment': wind_align,
+                        'aligned': aligned,
+                    })
+            all_rows.append(pd.DataFrame(rows))
+
+        return pd.concat(all_rows, ignore_index=True), True
+
+
 def fetch_historical_weather(locations):
     # Use the forecast endpoint with past_days instead of the archive (ERA5) API.
     # The ERA5 archive lags ~5 days, leaving the most recent calendar cells blank.

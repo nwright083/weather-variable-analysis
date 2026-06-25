@@ -103,6 +103,15 @@
 - **Forecaster auto-integration:** `odor_forecast_core.py` auto-loads `calvert_fitted_model.json` at import. `generate_site.py` exposes it as "Calvert City (Data-Fitted) — N reports" and makes it the default mode. No source edits required per fit. Removing the JSON + re-running `generate_site.py` reverts to `pittsburgh_proximity`.
 - **Open question tracked:** Calvert residents report odors after rain (contradicts Pittsburgh data). `precipitation_lag1` included as exploratory feature. Plan A+C: keep −0.864 now, collect data to settle empirically.
 
+### 9. Hourly ORI Forecast Tab — Completed 2026-06-25
+**Scope:** `odor_forecast_core.py`, `generate_site.py`, `docs/` (app.js, index.html, style.css)
+**What was done:**
+- `fetch_hourly_forecasts()` in `odor_forecast_core.py`: same Open-Meteo hourly call as the daily forecast, but returns per-hour rows (no aggregation). Parent-day DTR is merged onto all 24 hours so the ORI logistic regression is numerically identical to the daily model. Mock fallback generates sinusoidal diurnal patterns (temp, solar, BLH, wind).
+- `build_hourly_payload()` in `generate_site.py`: writes `docs/data/hourly.json` — 384 datetime slots × 32 tracts × 13 cell fields. 2.8 MB uncompressed / 253 KB gzipped. Lazy-loaded by the browser (no impact on initial page load).
+- **⏱️ Hourly tab** in the dashboard: mini-map location picker (colored by daily ORI from `APP.forecast`), 16-day day selector, inline SVG area/line chart (ORI over 24h, tier threshold lines, hover tooltips), 24-cell colored hour strip (each cell = one hour, background = ORI tier color, hover shows temp/wind/BLH). Re-renders live on model/coefficient changes.
+- **Google Form timezone fix:** `buildFormUrl()` now pre-fills the timestamp in local time with UTC offset (e.g. `2026-06-25T09:30:00-05:00`) instead of UTC ISO. Added optional `tzEntry` support for the new Timezone form field.
+- 2 new tests: `test_build_hourly_payload_schema` (generate_site), `test_hourly_dtr_attached_to_all_hours` (forecast_engine). All 11 tests pass.
+
 ---
 
 ## 🔧 In Progress

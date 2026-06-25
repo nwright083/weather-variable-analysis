@@ -352,6 +352,35 @@ A fully static daily-regenerated forecast website was built and deployed to GitH
     └── index.html               # UPDATED — removed Spatial & Dispersion section; no toggle-row
 ```
 
+### 15. Hourly Forecast Tab & Google Form Timezone Fix (2026-06-25)
+
+**New feature: ⏱️ Hourly tab** — per-hour ORI forecast for all 16 forecast days and all 32 census tracts.
+
+#### Data pipeline
+- `odor_forecast_core.py`: added `fetch_hourly_forecasts(locations)` — same Open-Meteo hourly call as `fetch_forecasts` but returns one row per location × hour instead of aggregating. DTR (diurnal temperature range) is computed as daily max−min temperature and attached to all 24 hours of each day so the existing ORI logistic regression works unchanged. Mock fallback generates plausible sinusoidal diurnal patterns (temp, solar, BLH) for offline use.
+- `generate_site.py`: added `build_hourly_payload(hourly_df)` → `docs/data/hourly.json` (384 datetime slots × 32 tracts, same cell schema as daily). Output is 2.8 MB uncompressed / **253 KB gzipped** (well within GitHub Pages limits). Lazy-loaded by the browser — does not delay initial page load.
+
+#### Frontend
+- `docs/index.html`: added `⏱️ Hourly` tab button and `#tab-hourly` panel section.
+- `docs/app.js`:
+  - Module-level `_hourlyLocId` / `_hourlyDate` state.
+  - `buildHourlyTab()`: lazy-loads `hourly.json` on first tab open, builds a mini-map location picker (same pattern as 16-Day/30-Day tabs, colored by daily ORI from `APP.forecast`), a day `<select>` (16 options), and calls `renderHourly()`. Wires My Location button, day selector, and `APP.onChange` re-render.
+  - `renderHourly()`: computes 24 hourly ORI values via `APP.oriFor(cell)` (cells carry `dtr` from the parent day), then renders:
+    - **Inline SVG area/line chart** (600×180 viewBox, responsive via CSS `width:100%`): area fill + colored circles, tier threshold dashed lines at 15/30/50%, hour labels at 0/3/6/9/12/15/18/21, SVG `<title>` tooltips showing temp/wind/BLH/solar per hour.
+    - **24-cell colored hour strip**: each cell background = ORI tier RGB, shows hour + ORI%, `title` tooltip with full inputs.
+    - Risk tier legend.
+  - `localTimestampStr()`: new helper that formats local time with UTC offset (e.g. `2026-06-25T09:30:00-05:00`).
+  - `buildFormUrl()`: updated to use `localTimestampStr()` instead of `new Date().toISOString()` — timestamps now show the reporter's local time with timezone offset embedded. If `window.GOOGLE_FORM.tzEntry` is set, also pre-fills the IANA timezone name.
+- `docs/style.css`: added `.hourly-chart`, `.hourly-chart-box`, `.hour-strip`, `.hour-cell`, `.hour-cell-label`, `.hour-cell-ori`, `.hourly-legend`. Mobile rule hides `.hour-cell-ori` to keep strip usable on narrow screens.
+
+#### Google Form timezone field
+`window.GOOGLE_FORM.tzEntry = null` added to `docs/index.html` — fill in the entry ID from the form's "Get pre-filled link" for the new Timezone short-answer field. Because the timestamp already includes the UTC offset, this field is optional but provides the IANA name (e.g. "America/Chicago") if desired.
+
+#### Tests added
+- `test_generate_site.py`: `test_build_hourly_payload_schema()` — validates 24×n_dates datetimes, all tract IDs present, required cell keys including `dtr`, correct types.
+- `test_forecast_engine.py`: `test_hourly_dtr_attached_to_all_hours()` — uses `mock.patch` to force the mock fallback, then asserts every (loc_id, date) group has exactly one unique DTR and row count = 32 × 16 × 24.
+- All 11 tests pass, 1 skipped (unchanged).
+
 ---
-*Last updated: 2026-06-25 by Claude Opus 4.8 / Sonnet 4.6 — precip fix, calvert_proximity removed, mini-maps, analyzer+installer tool, all 9 tests passing*
+*Last updated: 2026-06-25 by Claude Sonnet 4.6 — hourly forecast tab, Google Form local-timezone timestamps, 11 tests passing*
 

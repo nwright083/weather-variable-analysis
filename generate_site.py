@@ -71,6 +71,43 @@ def build_feature_payload(df, dates_sorted):
     return {"dates": list(dates_sorted), "locations": _location_directory(), "features": features}
 
 
+def build_hourly_payload(hourly_df):
+    """Build per-hour feature payload for the Hourly tab (lazy-loaded as hourly.json)."""
+    datetimes = sorted(hourly_df['datetime'].unique())
+    dates = sorted(hourly_df['date'].unique())
+
+    # Group by datetime once for efficiency
+    grouped = hourly_df.groupby('datetime', sort=True)
+    features = {}
+    for dt, group in grouped:
+        per_tract = {}
+        for _, row in group.iterrows():
+            loc_id = row['loc_id']
+            per_tract[loc_id] = {
+                "aligned": bool(row['aligned']),
+                "wind_alignment": round(float(row['wind_alignment']), 3),
+                "distance": round(float(row['distance_from_source']), 2),
+                "temp": round(float(row['temperature']), 1),
+                "temp_sq": round(float(row['temperature_squared']), 1),
+                "solar": round(float(row['solar_radiation']), 1),
+                "rh": round(float(row['relative_humidity']), 1),
+                "wind_speed": round(float(row['wind_speed']), 2),
+                "wind_dir": round(float(row['wind_direction']), 1),
+                "precip": round(float(row['precipitation']), 3),
+                "dtr": round(float(row['dtr']), 2),
+                "blh": round(float(row['boundary_layer_height']), 1),
+                "pressure": round(float(row['atmospheric_pressure']), 2),
+            }
+        features[dt] = per_tract
+
+    return {
+        "dates": list(dates),
+        "datetimes": list(datetimes),
+        "locations": _location_directory(),
+        "features": features,
+    }
+
+
 def build_meta():
     custom_ranges = {
         "const": [-30.0, 30.0, 0.1],
@@ -131,18 +168,22 @@ def main(output_dir=None):
     output_dir = output_dir or os.path.join(ROOT, "docs", "data")
     os.makedirs(output_dir, exist_ok=True)
 
-    fdf, f_mock = core.fetch_forecasts(core.LOCATIONS)
-    hdf, h_mock = core.fetch_historical_weather(core.LOCATIONS)
-    if f_mock or h_mock:
+    fdf, f_mock    = core.fetch_forecasts(core.LOCATIONS)
+    hdf, h_mock    = core.fetch_historical_weather(core.LOCATIONS)
+    hrdf, hr_mock  = core.fetch_hourly_forecasts(core.LOCATIONS)
+    if f_mock or h_mock or hr_mock:
         raise RuntimeError("Open-Meteo returned no live data (mock fallback); refusing to overwrite good data.")
 
-    f_dates = sorted(fdf["date"].unique())
-    h_dates = sorted(hdf["date"].unique())
+    f_dates  = sorted(fdf["date"].unique())
+    h_dates  = sorted(hdf["date"].unique())
+    hr_dates = sorted(hrdf["date"].unique())
 
     with open(os.path.join(output_dir, "forecast.json"), "w") as fh:
         json.dump(build_feature_payload(fdf, f_dates), fh)
     with open(os.path.join(output_dir, "historical.json"), "w") as fh:
         json.dump(build_feature_payload(hdf, h_dates), fh)
+    with open(os.path.join(output_dir, "hourly.json"), "w") as fh:
+        json.dump(build_hourly_payload(hrdf), fh)
     with open(os.path.join(output_dir, "meta.json"), "w") as fh:
         json.dump(build_meta(), fh, indent=2)
 
@@ -154,7 +195,8 @@ def main(output_dir=None):
             shutil.copy(src_geo, os.path.join(ROOT, "docs", dst_name))
             break
 
-    print(f"Wrote forecast ({len(f_dates)}d), historical ({len(h_dates)}d), meta to {output_dir}")
+    print(f"Wrote forecast ({len(f_dates)}d), historical ({len(h_dates)}d), "
+          f"hourly ({len(hr_dates)}d × 24h), meta to {output_dir}")
 
 
 if __name__ == "__main__":

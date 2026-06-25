@@ -9,10 +9,14 @@ import pandas as pd
 # Add the project root to path to test imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import unittest.mock as mock
+
 from odor_forecast_core import (
     predict_ori,
     compute_continuous_wind_alignment,
-    COEFFS_PITTSBURGH, COEFFS_EST_CALVERT, PRESSURE_ELEVATION_OFFSET
+    fetch_hourly_forecasts,
+    COEFFS_PITTSBURGH, COEFFS_EST_CALVERT, PRESSURE_ELEVATION_OFFSET,
+    LOCATIONS,
 )
 
 class TestCalvertOdorForecaster(unittest.TestCase):
@@ -299,6 +303,43 @@ class TestCalvertOdorForecaster(unittest.TestCase):
                 val = compute_continuous_wind_alignment(wind, bearing)
                 self.assertGreaterEqual(val, 0.0)
                 self.assertLessEqual(val, 1.0)
+
+
+    def test_hourly_dtr_attached_to_all_hours(self):
+        """Each hour of a calendar date must carry that date's daily max-min as its dtr.
+
+        Tested via the mock fallback (no network required): we force requests.get to
+        raise so fetch_hourly_forecasts falls through to its synthetic path, then verify
+        the DTR invariant holds across all location × date groups.
+        """
+        with mock.patch('odor_forecast_core.requests.get', side_effect=Exception("offline")):
+            df, is_mock = fetch_hourly_forecasts(LOCATIONS)
+
+        self.assertTrue(is_mock, "Should have fallen back to mock when requests.get fails")
+
+        # Every (loc_id, date) group must have exactly one unique DTR value
+        for (loc_id, date), group in df.groupby(['loc_id', 'date']):
+            unique_dtrs = group['dtr'].unique()
+            self.assertEqual(
+                len(unique_dtrs), 1,
+                msg=f"All hours of {date} / {loc_id} should share one DTR, got {unique_dtrs}"
+            )
+            self.assertGreater(float(unique_dtrs[0]), 0.0, msg="DTR must be positive")
+
+        # Basic schema checks
+        required_cols = {'datetime', 'date', 'hour', 'loc_id', 'temperature',
+                         'solar_radiation', 'dtr', 'boundary_layer_height',
+                         'wind_alignment', 'aligned'}
+        self.assertTrue(required_cols.issubset(set(df.columns)),
+                        msg=f"Missing columns: {required_cols - set(df.columns)}")
+
+        # 16 days × 24 hours per location
+        n_locs = len(LOCATIONS)
+        self.assertEqual(len(df), n_locs * 16 * 24)
+
+        # DTR values should be physically plausible (positive, not unreasonably large)
+        self.assertTrue((df['dtr'] > 0).all(), "All DTR values must be positive")
+        self.assertTrue((df['dtr'] < 50).all(), "DTR values should be < 50°F")
 
 
 if __name__ == '__main__':

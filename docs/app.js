@@ -1,7 +1,7 @@
 // Loads data + meta, wires the control panel, and renders all four tabs. ORI is
 // computed live via OdorModel using whatever coefficients/options the controls select.
 const APP = {
-  meta: null, forecast: null, historical: null,
+  meta: null, forecast: null, historical: null, hourly: null,
   _callbacks: [],
   onChange(cb) { this._callbacks.push(cb); },
   _fire() { this._callbacks.forEach(function (cb) { cb(); }); },
@@ -420,6 +420,17 @@ function renderMonthly() {
 
 // ── Report tab ────────────────────────────────────────────────────────────────
 
+function localTimestampStr() {
+  var d = new Date();
+  var pad = function(n) { return n < 10 ? '0' + n : String(n); };
+  var off = -d.getTimezoneOffset();
+  var sign = off >= 0 ? '+' : '-';
+  var absOff = Math.abs(off);
+  return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) +
+    'T' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()) +
+    sign + pad(Math.floor(absOff / 60)) + ':' + pad(absOff % 60);
+}
+
 function buildFormUrl(lat, lon) {
   var cfg = window.GOOGLE_FORM;
   var u = new URL(cfg.viewUrl);
@@ -428,7 +439,12 @@ function buildFormUrl(lat, lon) {
     u.searchParams.set(cfg.lonEntry, lon.toFixed(6));
   }
   if (cfg.tsEntry) {
-    u.searchParams.set(cfg.tsEntry, new Date().toISOString());
+    // Local time with UTC offset embedded — e.g. 2026-06-25T09:30:00-05:00
+    u.searchParams.set(cfg.tsEntry, localTimestampStr());
+  }
+  if (cfg.tzEntry) {
+    // Optional: pre-fill the Timezone field with the IANA name (e.g. "America/Chicago")
+    u.searchParams.set(cfg.tzEntry, Intl.DateTimeFormat().resolvedOptions().timeZone);
   }
   return u.toString();
 }
@@ -627,6 +643,255 @@ function renderMethodsTab() {
   panel.innerHTML = html;
 }
 
+// ── Hourly forecast tab ───────────────────────────────────────────────────────
+
+var _hourlyLocId = null;
+var _hourlyDate  = null;
+
+function renderHourly() {
+  var wrap = document.getElementById("hourly-chart-wrap");
+  if (!wrap || !APP.hourly || !_hourlyLocId || !_hourlyDate) return;
+
+  var locId = _hourlyLocId;
+  var date  = _hourlyDate;
+
+  // Gather 24 hours of computed ORI values
+  var hours = [];
+  for (var h = 0; h < 24; h++) {
+    var dt   = date + 'T' + (h < 10 ? '0' : '') + h + ':00';
+    var cell = (APP.hourly.features[dt] || {})[locId];
+    var ori  = cell ? APP.oriFor(cell) : null;
+    hours.push({h: h, dt: dt, cell: cell, ori: ori});
+  }
+
+  // SVG chart dimensions
+  var PL = 40, PR = 12, PT = 14, PB = 26;
+  var W  = 600, H  = 180;
+  var plotW = W - PL - PR;
+  var plotH = H - PT - PB;
+
+  function hx(h)   { return PL + (h / 23) * plotW; }
+  function vy(ori) { return PT + plotH - (ori / 100) * plotH; }
+
+  var valid = hours.filter(function(d) { return d.ori !== null; });
+
+  // Area + line paths
+  var areaPath = '', linePath = '';
+  if (valid.length > 0) {
+    var pts = valid.map(function(d) { return hx(d.h) + ',' + vy(d.ori); });
+    linePath = 'M' + pts.join('L');
+    var f = valid[0], l = valid[valid.length - 1];
+    areaPath = linePath + 'L' + hx(l.h) + ',' + (PT + plotH) + 'L' + hx(f.h) + ',' + (PT + plotH) + 'Z';
+  }
+
+  // Y-axis grid + labels
+  var yGridSvg = [0, 25, 50, 75, 100].map(function(v) {
+    var y = vy(v);
+    return '<line x1="' + PL + '" y1="' + y + '" x2="' + (PL + plotW) + '" y2="' + y +
+      '" stroke="#e2e8f0" stroke-width="1"/>' +
+      '<text x="' + (PL - 4) + '" y="' + (y + 4) + '" text-anchor="end" font-size="9" fill="#94a3b8">' + v + '%</text>';
+  }).join('');
+
+  // Tier threshold dashed lines
+  var threshSvg = [
+    {pct: 15, color: '#86efac'}, {pct: 30, color: '#fde047'}, {pct: 50, color: '#fdba74'}
+  ].map(function(t) {
+    var y = vy(t.pct);
+    return '<line x1="' + PL + '" y1="' + y + '" x2="' + (PL + plotW) + '" y2="' + y +
+      '" stroke="' + t.color + '" stroke-width="1.2" stroke-dasharray="4,3"/>';
+  }).join('');
+
+  // X-axis labels at 0, 3, 6 … 21
+  var xLabelsSvg = [0, 3, 6, 9, 12, 15, 18, 21].map(function(h) {
+    var lbl = h === 0 ? '12a' : h < 12 ? h + 'a' : h === 12 ? '12p' : (h - 12) + 'p';
+    return '<text x="' + hx(h) + '" y="' + (H - PB + 12) + '" text-anchor="middle" font-size="9" fill="#64748b">' + lbl + '</text>';
+  }).join('');
+
+  // X-axis ticks for all 24 hours
+  var xTicksSvg = hours.map(function(d) {
+    return '<line x1="' + hx(d.h) + '" y1="' + (PT + plotH) + '" x2="' + hx(d.h) + '" y2="' + (PT + plotH + 3) + '" stroke="#cbd5e1" stroke-width="1"/>';
+  }).join('');
+
+  // Data circles with title tooltips
+  var circlesSvg = valid.map(function(d) {
+    var tier = OdorModel.getRiskTier(d.ori);
+    var lbl  = d.h === 0 ? '12am' : d.h < 12 ? d.h + 'am' : d.h === 12 ? '12pm' : (d.h - 12) + 'pm';
+    var tip  = lbl + ': ' + d.ori.toFixed(1) + '%';
+    if (d.cell) {
+      tip += '\nTemp: ' + d.cell.temp.toFixed(1) + '°F';
+      tip += '\nWind: ' + d.cell.wind_speed.toFixed(1) + ' mph @ ' + Math.round(d.cell.wind_dir) + '°';
+      tip += '\nBLH: ' + Math.round(d.cell.blh) + ' ft';
+      tip += '\nSolar: ' + Math.round(d.cell.solar) + ' W/m²';
+    }
+    return '<circle cx="' + hx(d.h) + '" cy="' + vy(d.ori) + '" r="3" ' +
+      'fill="rgb(' + tier.rgb.join(',') + ')" stroke="#fff" stroke-width="1">' +
+      '<title>' + tip + '</title></circle>';
+  }).join('');
+
+  var svg =
+    '<svg viewBox="0 0 ' + W + ' ' + H + '" class="hourly-chart" aria-label="Hourly ORI chart">' +
+    '<rect x="' + PL + '" y="' + PT + '" width="' + plotW + '" height="' + plotH + '" fill="#f8fafc"/>' +
+    yGridSvg + threshSvg + xTicksSvg + xLabelsSvg +
+    (areaPath ? '<path d="' + areaPath + '" fill="rgba(37,99,235,0.1)"/>' : '') +
+    (linePath ? '<path d="' + linePath + '" fill="none" stroke="#2563eb" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>' : '') +
+    circlesSvg +
+    '<line x1="' + PL + '" y1="' + PT + '" x2="' + PL + '" y2="' + (PT + plotH) + '" stroke="#94a3b8" stroke-width="1"/>' +
+    '<line x1="' + PL + '" y1="' + (PT + plotH) + '" x2="' + (PL + plotW) + '" y2="' + (PT + plotH) + '" stroke="#94a3b8" stroke-width="1"/>' +
+    '</svg>';
+
+  // 24-cell colored hour strip
+  var stripCells = hours.map(function(d) {
+    var tier     = d.ori !== null ? OdorModel.getRiskTier(d.ori) : {rgb: [148, 163, 184]};
+    var textCol  = (d.ori !== null && d.ori >= 15) ? '#fff' : '#334155';
+    var hLbl     = d.h === 0 ? '12a' : d.h < 12 ? d.h + 'a' : d.h === 12 ? '12p' : (d.h - 12) + 'p';
+    var oriStr   = d.ori !== null ? d.ori.toFixed(0) + '%' : '—';
+    var tip = '';
+    if (d.cell) {
+      var full = d.h === 0 ? '12am' : d.h < 12 ? d.h + 'am' : d.h === 12 ? '12pm' : (d.h - 12) + 'pm';
+      tip = full + ': ' + (d.ori !== null ? d.ori.toFixed(1) + '%' : '—') +
+        ' | ' + d.cell.temp.toFixed(1) + '°F, ' + d.cell.wind_speed.toFixed(1) + ' mph @ ' +
+        Math.round(d.cell.wind_dir) + '°, BLH ' + Math.round(d.cell.blh) + 'ft';
+    }
+    return '<div class="hour-cell" style="background:rgb(' + tier.rgb.join(',') + ');color:' + textCol + ';" title="' + tip + '">' +
+      '<div class="hour-cell-label">' + hLbl + '</div>' +
+      '<div class="hour-cell-ori">' + oriStr + '</div>' +
+      '</div>';
+  }).join('');
+
+  var legend =
+    '<div class="hourly-legend">' +
+    '<span class="badge-pill badge-clear">Clear &lt;15%</span>' +
+    '<span class="badge-pill badge-moderate">Moderate 15–30%</span>' +
+    '<span class="badge-pill badge-elevated">Elevated 30–50%</span>' +
+    '<span class="badge-pill badge-high">High ≥50%</span>' +
+    '</div>';
+
+  wrap.innerHTML =
+    '<div class="hourly-chart-box">' + svg + '</div>' +
+    '<div class="hour-strip">' + stripCells + '</div>' +
+    legend;
+}
+
+async function buildHourlyTab() {
+  if (!APP.hourly) {
+    APP.hourly = await loadJSON("data/hourly.json");
+  }
+  if (APP._locMaps.hourly) {
+    APP._locMaps.hourly.map.invalidateSize();
+    return;
+  }
+
+  var locs = APP.hourly.locations;
+  _hourlyLocId = locs.length ? (locs[0].id || locs[0].zip) : null;
+  _hourlyDate  = APP.hourly.dates[0];
+
+  var panel = document.getElementById("tab-hourly");
+
+  var datesHtml = APP.hourly.dates.map(function(d, i) {
+    var dt  = new Date(d + 'T00:00:00');
+    var lbl = dt.toLocaleDateString(undefined, {weekday: 'short', month: 'short', day: 'numeric'});
+    return '<option value="' + d + '"' + (i === 0 ? ' selected' : '') + '>' + lbl + '</option>';
+  }).join('');
+
+  panel.innerHTML =
+    '<div class="loc-header">' +
+    '  <button id="btn-locate-hourly" class="btn-locate-small">📍 My Location</button>' +
+    '  <span id="hourly-loc-label" class="loc-label">Click a tract on the map</span>' +
+    '  <label style="font-size:0.82rem;flex-shrink:0;white-space:nowrap;">Day ' +
+    '    <select id="hourly-date-sel">' + datesHtml + '</select>' +
+    '  </label>' +
+    '</div>' +
+    '<div id="hourly-loc-map" class="loc-select-map"></div>' +
+    '<div id="hourly-chart-wrap"></div>';
+
+  await ensureGeoJson();
+
+  var IND = [37.0486, -88.3480];
+  var m   = L.map("hourly-loc-map", {zoomControl: false}).setView([37.05, -88.35], 9);
+  L.tileLayer("https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
+    {attribution: "© OpenStreetMap contributors, © CARTO", maxZoom: 19}).addTo(m);
+  L.circleMarker(IND, {radius: 6, color: "#475569", fillColor: "#64748b", fillOpacity: 0.85})
+    .bindTooltip("Industrial Complex").addTo(m);
+
+  var geoLayer = null;
+  function renderHourlyLocMap() {
+    if (geoLayer) { m.removeLayer(geoLayer); geoLayer = null; }
+    // Color tracts by daily ORI on the selected day (reuse APP.forecast for consistency)
+    var dailyFeats = APP.forecast.features[_hourlyDate] || {};
+    geoLayer = L.geoJSON(APP._mapState.geojson, {
+      style: function(f) {
+        var fid  = f.properties.GEOID || f.properties.zip || "";
+        var cell = dailyFeats[fid];
+        var isSel = (fid === _hourlyLocId);
+        if (!cell) return {color: isSel ? "#1e3a8a" : "#94a3b8", weight: isSel ? 3 : 1, fillColor: "#cbd5e1", fillOpacity: isSel ? 0.35 : 0.15};
+        var tier = OdorModel.getRiskTier(APP.oriFor(cell));
+        return {
+          color: isSel ? "#1e3a8a" : "#475569",
+          weight: isSel ? 3 : 1.2,
+          fillColor: "rgb(" + tier.rgb.join(",") + ")",
+          fillOpacity: isSel ? 0.65 : 0.4,
+        };
+      },
+      onEachFeature: function(f, layer) {
+        var fid   = f.properties.GEOID || f.properties.zip || "";
+        var dname = f.properties.display_name || f.properties.NAME || fid;
+        layer.on("click", function() {
+          _hourlyLocId = fid;
+          updateLocLabel("hourly", dname);
+          renderHourlyLocMap();
+          renderHourly();
+        });
+        var cell = dailyFeats[fid];
+        var ori  = cell ? APP.oriFor(cell) : null;
+        layer.bindTooltip(dname + (ori ? "<br>Daily ORI: " + ori.toFixed(1) + "%" : ""), {sticky: true});
+      },
+    }).addTo(m);
+  }
+
+  updateLocLabel("hourly", locDisplayName(_hourlyLocId) || (locs[0] && locs[0].name) || "");
+  renderHourlyLocMap();
+
+  APP._locMaps.hourly = {
+    map: m,
+    getLocId: function() { return _hourlyLocId; },
+    setLocId: function(id, name) {
+      _hourlyLocId = id;
+      updateLocLabel("hourly", name);
+      renderHourlyLocMap();
+      renderHourly();
+    },
+  };
+
+  // Re-render chart when mode/coefficients change
+  APP.onChange(function() {
+    if (document.getElementById("tab-hourly").classList.contains("active")) {
+      renderHourly();
+    }
+  });
+  // Re-color the mini-map too when mode changes
+  APP.onChange(renderHourlyLocMap);
+
+  // Day selector
+  document.getElementById("hourly-date-sel").addEventListener("change", function() {
+    _hourlyDate = this.value;
+    renderHourlyLocMap();
+    renderHourly();
+  });
+
+  // My Location button
+  document.getElementById("btn-locate-hourly").addEventListener("click", function() {
+    if (!navigator.geolocation) { alert("Geolocation not supported."); return; }
+    navigator.geolocation.getCurrentPosition(function(pos) {
+      var near = nearestLocation(pos.coords.latitude, pos.coords.longitude);
+      if (!near) return;
+      var nid = near.id || near.zip;
+      APP._locMaps.hourly.setLocId(nid, locDisplayName(nid) || near.name);
+    }, function() { alert("Could not get your location."); });
+  });
+
+  renderHourly();
+}
+
 // ── Map tab geolocation ───────────────────────────────────────────────────────
 
 function wireLocateMapButton() {
@@ -686,6 +951,10 @@ async function main() {
     if (name === "monthly") {
       await buildLocSelectMap("monthly");
       setTimeout(function () { if (APP._locMaps.monthly) APP._locMaps.monthly.map.invalidateSize(); }, 50);
+    }
+    if (name === "hourly") {
+      await buildHourlyTab();
+      setTimeout(function() { if (APP._locMaps.hourly) APP._locMaps.hourly.map.invalidateSize(); }, 50);
     }
     if (name === "report") { renderReportTab(); }
     if (name === "methods") { renderMethodsTab(); }
