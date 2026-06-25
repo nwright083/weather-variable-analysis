@@ -28,11 +28,6 @@
         <select id="mode-select"></select>
       </label>
       <div id="custom-coeffs" class="custom-coeffs" hidden></div>
-      <div class="toggle-row">
-        <label class="toggle-chip"><input type="checkbox" id="wind-filter" checked /> Wind Filter</label>
-        <label class="toggle-chip"><input type="checkbox" id="continuous-alignment" checked /> Continuous</label>
-        <label class="toggle-chip"><input type="checkbox" id="distance-decay" checked /> Dist. Decay</label>
-      </div>
     </aside>
 
     <main class="content">
@@ -43,12 +38,7 @@
         <button data-tab="report" class="tab">📋 Report Odor</button>
       </nav>
       <section id="tab-map" class="tab-panel active"></section>
-      <section id="tab-forecast" class="tab-panel">
-        <label>Location
-          <select id="forecast-loc"></select>
-        </label>
-        <div id="forecast-grid" class="card-grid"></div>
-      </section>
+      <section id="tab-forecast" class="tab-panel"></section>
       <section id="tab-monthly" class="tab-panel"></section>
       <section id="tab-report" class="tab-panel"></section>
     </main>

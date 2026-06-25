@@ -25,15 +25,15 @@ const APP = {
     var dd = this.meta.distance_defaults;
     return {
       pressureOffset: this.meta.pressure_offset,
-      windFilter: modeIsProximity() ? false : document.getElementById("wind-filter").checked,
-      continuousAlignment: document.getElementById("continuous-alignment")?.checked ?? true,
+      windFilter: isCustom,
+      continuousAlignment: true,
       penalty: isCustom
         ? 1 - (parseFloat(document.getElementById("cc-penalty_pct").value) / 100)
         : 1 - (wd.penalty_pct / 100),
       boost: isCustom
         ? parseFloat(document.getElementById("cc-boost").value)
         : wd.boost,
-      distanceDecay: modeIsProximity() ? false : document.getElementById("distance-decay").checked,
+      distanceDecay: isCustom,
       decayRate: isCustom
         ? parseFloat(document.getElementById("cc-decay_rate").value)
         : dd.rate,
@@ -52,17 +52,6 @@ async function loadJSON(path) {
 
 // Keys that are spatial adjustment parameters, not model coefficients
 var SPATIAL_KEYS = ["penalty_pct", "boost", "decay_rate"];
-
-// Modes where wind alignment and distance decay are baked into the regression
-// coefficients — post-hoc toggles would double-count the spatial effects
-var PROXIMITY_MODES = ["pittsburgh_proximity", "calvert_proximity"];
-
-function modeIsProximity() { return PROXIMITY_MODES.indexOf(APP.mode()) !== -1; }
-
-function syncToggleRow() {
-  var tr = document.querySelector(".toggle-row");
-  if (tr) tr.hidden = modeIsProximity();
-}
 
 var CC_LABELS = {
   "const": "Const (intercept)",
@@ -90,7 +79,7 @@ function buildModeSelect() {
   });
   var custom = document.createElement("option"); custom.value = "custom"; custom.textContent = "Custom (manual)";
   sel.appendChild(custom);
-  sel.value = APP.meta.default_mode || "pittsburgh_proximity";
+  sel.value = APP.meta.default_mode || "calvert_proximity";
 }
 
 function buildCustomCoeffSliders() {
@@ -140,13 +129,10 @@ function buildCustomCoeffSliders() {
 }
 
 function wireControls() {
-  ["mode-select", "wind-filter", "continuous-alignment", "distance-decay"].forEach(function (id) {
-    var el = document.getElementById(id);
-    if (el) el.addEventListener("input", function () {
-      document.getElementById("custom-coeffs").hidden = (APP.mode() !== "custom");
-      syncToggleRow();
-      APP._fire();
-    });
+  var sel = document.getElementById("mode-select");
+  if (sel) sel.addEventListener("input", function () {
+    document.getElementById("custom-coeffs").hidden = (APP.mode() !== "custom");
+    APP._fire();
   });
   document.getElementById("custom-coeffs").addEventListener("input", function () { APP._fire(); });
 }
@@ -160,11 +146,157 @@ function setActiveTab(name) {
 }
 APP.switchTab = setActiveTab;
 
+// ── Location-select mini-maps (16-Day and 30-Day tabs) ────────────────────────
+
+APP._locMaps = {};  // keyed by "forecast" | "monthly"
+
+async function ensureGeoJson() {
+  if (!APP._mapState.geojson) {
+    APP._mapState.geojson = await loadJSON("calvert_areas.geojson");
+  }
+}
+
+function updateLocLabel(tabKey, name) {
+  var el = document.getElementById(tabKey + "-loc-label");
+  if (el) el.textContent = name;
+}
+
+function nearestLocation(lat, lon) {
+  var nearest = null, nearestDist = Infinity;
+  APP.forecast.locations.forEach(function (loc) {
+    var d = Math.hypot(loc.lat - lat, loc.lon - lon);
+    if (d < nearestDist) { nearestDist = d; nearest = loc; }
+  });
+  return nearest;
+}
+
+function locDisplayName(locId) {
+  if (!APP._mapState.geojson) return locId;
+  var feat = APP._mapState.geojson.features.find(function (f) {
+    return (f.properties.GEOID || f.properties.zip || "") === locId;
+  });
+  return feat ? (feat.properties.display_name || feat.properties.NAME || locId) : locId;
+}
+
+async function buildLocSelectMap(tabKey) {
+  if (APP._locMaps[tabKey]) {
+    APP._locMaps[tabKey].map.invalidateSize();
+    return;
+  }
+
+  var panel = document.getElementById("tab-" + tabKey);
+  if (!panel.querySelector(".loc-header")) {
+    // Build the tab structure (header + mini-map + content area)
+    var calHead = tabKey === "monthly"
+      ? '<div class="calendar-head calendar-grid"></div>'
+      : "";
+    var contentId = tabKey === "forecast" ? "forecast-grid" : "calendar";
+    var contentCls = tabKey === "forecast" ? "card-grid" : "calendar-grid";
+    panel.innerHTML =
+      '<div class="loc-header">' +
+      '  <button id="btn-locate-' + tabKey + '" class="btn-locate-small">📍 My Location</button>' +
+      '  <span id="' + tabKey + '-loc-label" class="loc-label">Click a tract on the map</span>' +
+      '</div>' +
+      '<div id="' + tabKey + '-loc-map" class="loc-select-map"></div>' +
+      calHead +
+      '<div id="' + contentId + '" class="' + contentCls + '"></div>';
+
+    if (tabKey === "monthly") {
+      var head = panel.querySelector(".calendar-head");
+      ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].forEach(function (d) {
+        var c = document.createElement("div"); c.textContent = d; head.appendChild(c);
+      });
+    }
+  }
+
+  await ensureGeoJson();
+
+  var IND = [37.0486, -88.3480];
+  var m = L.map(tabKey + "-loc-map", {zoomControl: false}).setView([37.05, -88.35], 9);
+  L.tileLayer("https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
+    {attribution: "© OpenStreetMap contributors, © CARTO", maxZoom: 19}).addTo(m);
+  L.circleMarker(IND, {radius: 6, color: "#475569", fillColor: "#64748b", fillOpacity: 0.85})
+    .bindTooltip("Industrial Complex").addTo(m);
+
+  var locs = APP.forecast.locations;
+  var locId = locs.length ? (locs[0].id || locs[0].zip) : null;
+  var geoLayer = null;
+
+  function renderLocMap() {
+    if (geoLayer) { m.removeLayer(geoLayer); geoLayer = null; }
+    var date = APP.forecast.dates[0];
+    var feats = APP.forecast.features[date] || {};
+    geoLayer = L.geoJSON(APP._mapState.geojson, {
+      style: function (f) {
+        var fid = f.properties.GEOID || f.properties.zip || "";
+        var cell = feats[fid];
+        var isSel = (fid === locId);
+        if (!cell) return {color: isSel ? "#1e3a8a" : "#94a3b8", weight: isSel ? 3 : 1, fillColor: "#cbd5e1", fillOpacity: isSel ? 0.35 : 0.15};
+        var tier = OdorModel.getRiskTier(APP.oriFor(cell));
+        return {
+          color: isSel ? "#1e3a8a" : "#475569",
+          weight: isSel ? 3 : 1.2,
+          fillColor: "rgb(" + tier.rgb.join(",") + ")",
+          fillOpacity: isSel ? 0.65 : 0.4,
+        };
+      },
+      onEachFeature: function (f, layer) {
+        var fid = f.properties.GEOID || f.properties.zip || "";
+        var dname = f.properties.display_name || f.properties.NAME || fid;
+        layer.on("click", function () {
+          locId = fid;
+          renderLocMap();
+          updateLocLabel(tabKey, dname);
+          if (tabKey === "forecast") renderForecastGrid();
+          else renderMonthly();
+        });
+        var cell = feats[fid];
+        var ori = cell ? APP.oriFor(cell) : null;
+        layer.bindTooltip(dname + (ori ? "<br>ORI: " + ori.toFixed(1) + "%" : ""), {sticky: true});
+      },
+    }).addTo(m);
+  }
+
+  // Set initial label
+  updateLocLabel(tabKey, locDisplayName(locId) || (locs[0] && locs[0].name) || "");
+
+  renderLocMap();
+  APP.onChange(renderLocMap);
+
+  APP._locMaps[tabKey] = {
+    map: m,
+    getLocId: function () { return locId; },
+    setLocId: function (id, name) { locId = id; renderLocMap(); updateLocLabel(tabKey, name); },
+  };
+
+  // Wire the "My Location" button for this tab
+  var btn = document.getElementById("btn-locate-" + tabKey);
+  if (btn) {
+    btn.addEventListener("click", function () {
+      if (!navigator.geolocation) { alert("Geolocation not supported."); return; }
+      navigator.geolocation.getCurrentPosition(function (pos) {
+        var near = nearestLocation(pos.coords.latitude, pos.coords.longitude);
+        if (!near) return;
+        var nid = near.id || near.zip;
+        APP._locMaps[tabKey].setLocId(nid, locDisplayName(nid) || near.name);
+        if (tabKey === "forecast") renderForecastGrid();
+        else renderMonthly();
+      }, function () { alert("Could not get your location."); });
+    });
+  }
+
+  // Initial content render
+  if (tabKey === "forecast") renderForecastGrid();
+  else renderMonthly();
+}
+
 // ── 16-Day forecast grid ──────────────────────────────────────────────────────
 
 function renderForecastGrid() {
-  var loc = document.getElementById("forecast-loc").value;
+  var lm = APP._locMaps && APP._locMaps.forecast;
+  var loc = lm ? lm.getLocId() : (APP.forecast.locations[0] ? (APP.forecast.locations[0].id || APP.forecast.locations[0].zip) : null);
   var grid = document.getElementById("forecast-grid");
+  if (!loc || !grid) return;
   grid.innerHTML = "";
   APP.forecast.dates.forEach(function (d) {
     var cell = APP.forecast.features[d][loc];
@@ -176,27 +308,17 @@ function renderForecastGrid() {
     var card = document.createElement("div");
     card.className = "clean-card";
     card.innerHTML =
-      '<div style="font-weight:600;font-size:0.78rem;">' + dt.toLocaleDateString(undefined, {weekday:"short"}) + '</div>' +
-      '<div style="font-size:0.68rem;opacity:0.6;">' + dt.toLocaleDateString(undefined, {month:"short", day:"numeric"}) + '</div>' +
+      '<div style="font-weight:600;font-size:0.78rem;">' + dt.toLocaleDateString(undefined, {weekday: "short"}) + '</div>' +
+      '<div style="font-size:0.68rem;opacity:0.6;">' + dt.toLocaleDateString(undefined, {month: "short", day: "numeric"}) + '</div>' +
       '<div style="font-size:1.4rem;font-weight:700;color:' + rgb + ';margin:0.25rem 0;">' + ori.toFixed(1) + '%</div>' +
       '<span class="badge-pill ' + tier.cls + '">' + tier.label.split(" ")[0] + '</span>';
     grid.appendChild(card);
   });
 }
 
-function buildForecastLocSelect() {
-  var sel = document.getElementById("forecast-loc");
-  APP.forecast.locations.forEach(function (l) {
-    var locId = l.id || l.zip;
-    var o = document.createElement("option"); o.value = locId; o.textContent = locId + " — " + l.name;
-    sel.appendChild(o);
-  });
-  sel.addEventListener("change", renderForecastGrid);
-}
+// ── Leaflet map (ORI overview tab) ────────────────────────────────────────────
 
-// ── Leaflet map ───────────────────────────────────────────────────────────────
-
-APP._mapState = { map: null, geo: null, geojson: null, dateSel: null };
+APP._mapState = {map: null, geo: null, geojson: null, dateSel: null};
 APP._map = null;
 APP._userMarker = null;
 
@@ -227,12 +349,12 @@ async function ensureMap() {
   var IND = [37.0486, -88.3480];
   var map = L.map("map").setView([IND[0] - 0.05, IND[1]], 10);
   L.tileLayer("https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
-    { attribution: "© OpenStreetMap contributors, © CARTO", maxZoom: 19 }).addTo(map);
-  L.circleMarker(IND, { radius: 9, color: "#475569", fillColor: "#64748b", fillOpacity: 0.9 })
+    {attribution: "© OpenStreetMap contributors, © CARTO", maxZoom: 19}).addTo(map);
+  L.circleMarker(IND, {radius: 9, color: "#475569", fillColor: "#64748b", fillOpacity: 0.9})
     .bindTooltip("Calvert City Industrial Complex (Source)").addTo(map);
   APP._mapState.map = map;
-  APP._map = map;  // alias for geolocation handler
-  APP._mapState.geojson = await loadJSON("calvert_areas.geojson");
+  APP._map = map;
+  await ensureGeoJson();
 }
 
 function renderMap() {
@@ -247,15 +369,15 @@ function renderMap() {
     style: function (f) {
       var locId = f.properties.GEOID || f.properties.zip || f.properties.ZCTA5CE10 || "";
       var cell = feats[locId];
-      if (!cell) return { color: "#94a3b8", weight: 1, fillColor: "#cbd5e1", fillOpacity: 0.2 };
+      if (!cell) return {color: "#94a3b8", weight: 1, fillColor: "#cbd5e1", fillOpacity: 0.2};
       var tier = OdorModel.getRiskTier(APP.oriFor(cell));
-      return { color: "#475569", weight: 1.5, fillColor: "rgb(" + tier.rgb.join(",") + ")", fillOpacity: 0.45 };
+      return {color: "#475569", weight: 1.5, fillColor: "rgb(" + tier.rgb.join(",") + ")", fillOpacity: 0.45};
     },
     onEachFeature: function (f, layer) {
       var locId = f.properties.GEOID || f.properties.zip || f.properties.ZCTA5CE10 || "";
       var cell = feats[locId];
       var ori = cell ? APP.oriFor(cell) : null;
-      var tier = cell ? OdorModel.getRiskTier(ori) : { label: "N/A" };
+      var tier = cell ? OdorModel.getRiskTier(ori) : {label: "N/A"};
       var displayName = f.properties.display_name || f.properties.NAME || locId;
       layer.bindTooltip(
         "Area: " + displayName + "<br>ORI: " +
@@ -268,29 +390,14 @@ function renderMap() {
 // ── 30-day historical calendar ────────────────────────────────────────────────
 
 function renderMonthly() {
-  var panel = document.getElementById("tab-monthly");
-  if (!panel.querySelector("#monthly-loc")) {
-    panel.innerHTML =
-      '<label>Location <select id="monthly-loc"></select></label>' +
-      '<div class="calendar-head calendar-grid"></div>' +
-      '<div id="calendar" class="calendar-grid"></div>';
-    var sel = panel.querySelector("#monthly-loc");
-    APP.historical.locations.forEach(function (l) {
-      var locId = l.id || l.zip;
-      var o = document.createElement("option"); o.value = locId; o.textContent = locId + " — " + l.name;
-      sel.appendChild(o);
-    });
-    sel.addEventListener("change", renderMonthly);
-    var head = panel.querySelector(".calendar-head");
-    ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].forEach(function (d) {
-      var c = document.createElement("div"); c.textContent = d; head.appendChild(c);
-    });
-  }
-  var loc = panel.querySelector("#monthly-loc").value;
-  var cal = panel.querySelector("#calendar");
+  var lm = APP._locMaps && APP._locMaps.monthly;
+  var loc = lm ? lm.getLocId()
+    : (APP.historical.locations[0] ? (APP.historical.locations[0].id || APP.historical.locations[0].zip) : null);
+  var cal = document.getElementById("calendar");
+  if (!loc || !cal) return;
   cal.innerHTML = "";
   var dates = APP.historical.dates;
-  var firstWeekday = (new Date(dates[0] + "T00:00:00").getDay() + 6) % 7; // Mon=0
+  var firstWeekday = (new Date(dates[0] + "T00:00:00").getDay() + 6) % 7;
   for (var i = 0; i < firstWeekday; i++) { cal.appendChild(document.createElement("div")); }
   dates.forEach(function (d) {
     var cell = APP.historical.features[d][loc];
@@ -301,7 +408,7 @@ function renderMonthly() {
       var tier = OdorModel.getRiskTier(ori);
       var dt = new Date(d + "T00:00:00");
       div.innerHTML =
-        '<div style="font-size:0.68rem;opacity:0.6;">' + dt.toLocaleDateString(undefined,{month:"short",day:"numeric"}) + '</div>' +
+        '<div style="font-size:0.68rem;opacity:0.6;">' + dt.toLocaleDateString(undefined, {month: "short", day: "numeric"}) + '</div>' +
         '<div style="font-size:1.1rem;font-weight:700;color:rgb(' + tier.rgb.join(",") + ');">' + ori.toFixed(1) + '%</div>' +
         '<span class="badge-pill ' + tier.cls + '" title="Wind ' + cell.wind_speed.toFixed(1) + ' mph @ ' +
         Math.round(cell.wind_dir) + '°, PBLH ' + Math.round(cell.blh) + ' ft, Rain ' + cell.precip.toFixed(2) + ' in">' +
@@ -343,10 +450,7 @@ function renderReportTab() {
 
   function openForm(skew) {
     var statusEl = panel.querySelector("#geo-status");
-    if (!navigator.geolocation) {
-      statusEl.textContent = "Geolocation not supported by this browser.";
-      return;
-    }
+    if (!navigator.geolocation) { statusEl.textContent = "Geolocation not supported by this browser."; return; }
     statusEl.textContent = "Getting your location…";
     navigator.geolocation.getCurrentPosition(function (pos) {
       var lat = pos.coords.latitude, lon = pos.coords.longitude;
@@ -355,7 +459,7 @@ function renderReportTab() {
       window.open(buildFormUrl(lat, lon), "_blank", "noopener");
     }, function (err) {
       statusEl.textContent = "Could not get location: " + err.message;
-    }, { enableHighAccuracy: true, timeout: 10000 });
+    }, {enableHighAccuracy: true, timeout: 10000});
   }
 
   panel.querySelector("#btn-geo").addEventListener("click", function () { openForm(false); });
@@ -369,28 +473,18 @@ function wireLocateMapButton() {
     if (!navigator.geolocation) { alert("Geolocation not supported."); return; }
     navigator.geolocation.getCurrentPosition(function (pos) {
       var lat = pos.coords.latitude, lon = pos.coords.longitude;
-      // Center the map
       if (APP._map) APP._map.setView([lat, lon], 12);
-      // Add a marker
       if (APP._userMarker) APP._map.removeLayer(APP._userMarker);
-      APP._userMarker = L.marker([lat, lon]).addTo(APP._map)
-        .bindPopup("Your location").openPopup();
-      // Find nearest location in today's data and show its ORI
-      var today = APP.forecast.dates[0];
-      var features = APP.forecast.features[today] || {};
-      var nearest = null, nearestDist = Infinity;
-      APP.forecast.locations.forEach(function (loc) {
-        var d = Math.hypot(loc.lat - lat, loc.lon - lon);
-        if (d < nearestDist) { nearestDist = d; nearest = loc; }
-      });
-      if (nearest) {
-        var locId = nearest.id || nearest.zip;
-        var cell = features[locId];
+      APP._userMarker = L.marker([lat, lon]).addTo(APP._map).bindPopup("Your location").openPopup();
+      var near = nearestLocation(lat, lon);
+      if (near) {
+        var locId = near.id || near.zip;
+        var cell = (APP.forecast.features[APP.forecast.dates[0]] || {})[locId];
         if (cell) {
           var ori = APP.oriFor(cell);
           var tier = OdorModel.getRiskTier(ori);
           L.popup().setLatLng([lat, lon])
-            .setContent("<b>Nearest forecast area:</b> " + nearest.name + "<br><b>ORI: " + ori + "%</b> — " + tier.label)
+            .setContent("<b>Nearest area:</b> " + near.name + "<br><b>ORI: " + ori + "%</b> — " + tier.label)
             .openOn(APP._map);
         }
       }
@@ -410,12 +504,7 @@ async function main() {
 
   buildModeSelect();
   buildCustomCoeffSliders();
-  buildForecastLocSelect();
-  if (APP.meta.distance_defaults) {
-    document.getElementById("distance-decay").checked = APP.meta.distance_defaults.enabled;
-  }
   wireControls();
-  syncToggleRow();
 
   mapPanelScaffold();
   wireLocateMapButton();
@@ -425,9 +514,19 @@ async function main() {
   });
 
   APP._onTab = async function (name) {
-    if (name === "map")     { await ensureMap(); setTimeout(function () { APP._mapState.map.invalidateSize(); renderMap(); }, 50); }
-    if (name === "monthly") { renderMonthly(); }
-    if (name === "report")  { renderReportTab(); }
+    if (name === "map") {
+      await ensureMap();
+      setTimeout(function () { APP._mapState.map.invalidateSize(); renderMap(); }, 50);
+    }
+    if (name === "forecast") {
+      await buildLocSelectMap("forecast");
+      setTimeout(function () { if (APP._locMaps.forecast) APP._locMaps.forecast.map.invalidateSize(); }, 50);
+    }
+    if (name === "monthly") {
+      await buildLocSelectMap("monthly");
+      setTimeout(function () { if (APP._locMaps.monthly) APP._locMaps.monthly.map.invalidateSize(); }, 50);
+    }
+    if (name === "report") { renderReportTab(); }
   };
 
   APP.onChange(renderForecastGrid);
@@ -436,9 +535,7 @@ async function main() {
     if (document.getElementById("tab-monthly").classList.contains("active")) renderMonthly();
   });
 
-  renderForecastGrid();
-
-  // Pre-initialize the map on the default tab
+  // Pre-initialize the map tab (default active tab)
   await ensureMap();
   renderMap();
 }

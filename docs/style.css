@@ -68,10 +68,12 @@ button:hover { background:#f1f5f9; }
 #tab-forecast > label, #tab-monthly > label { font-size:0.82rem; display:block; margin-bottom:0.4rem; }
 select { font-size:0.82rem; padding:0.25rem 0.4rem; border:1px solid #cbd5e1; border-radius:4px; }
 
-/* Compact toggle row (Wind Filter / Continuous / Dist. Decay) */
-.toggle-row { display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0.6rem 0 0; }
-.toggle-chip { display: flex !important; align-items: center; gap: 0.25rem; font-size: 0.72rem !important; padding: 0.22rem 0.45rem; background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 4px; cursor: pointer; margin: 0 !important; white-space: nowrap; }
-.toggle-chip:hover { background: #e2e8f0; }
+/* Location-select mini-map (16-Day and 30-Day tabs) */
+.loc-select-map { height: 200px; border-radius: 8px; margin: 0.4rem 0 0.6rem; border: 1px solid #e2e8f0; }
+.loc-header { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.3rem; flex-wrap: wrap; }
+.loc-label { font-size: 0.82rem; color: #475569; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.btn-locate-small { padding: 0.3rem 0.65rem; font-size: 0.78rem; font-weight: 500; background: #2563eb; color: white; border: none; border-radius: 6px; cursor: pointer; white-space: nowrap; flex-shrink: 0; }
+.btn-locate-small:hover { background: #1d4ed8; }
 
 /* Custom coefficient section headers */
 .cc-section-head { font-size: 0.64rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.07em; margin: 0.75rem 0 0.25rem; padding-top: 0.5rem; border-top: 1px solid #e2e8f0; }
