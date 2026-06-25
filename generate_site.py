@@ -95,7 +95,7 @@ def build_meta():
         "generated_utc": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "source": "Open-Meteo (NWP + ERA5)",
         "pressure_offset": core.PRESSURE_ELEVATION_OFFSET,
-        "default_mode": "pittsburgh_proximity",
+        "default_mode": "calvert_proximity",
         "coeffs": {
             "estimated_calvert": core.COEFFS_EST_CALVERT,
             "exact_pittsburgh": core.COEFFS_PITTSBURGH,

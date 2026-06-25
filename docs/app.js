@@ -25,7 +25,7 @@ const APP = {
     var dd = this.meta.distance_defaults;
     return {
       pressureOffset: this.meta.pressure_offset,
-      windFilter: document.getElementById("wind-filter").checked,
+      windFilter: modeIsProximity() ? false : document.getElementById("wind-filter").checked,
       continuousAlignment: document.getElementById("continuous-alignment")?.checked ?? true,
       penalty: isCustom
         ? 1 - (parseFloat(document.getElementById("cc-penalty_pct").value) / 100)
@@ -33,7 +33,7 @@ const APP = {
       boost: isCustom
         ? parseFloat(document.getElementById("cc-boost").value)
         : wd.boost,
-      distanceDecay: document.getElementById("distance-decay").checked,
+      distanceDecay: modeIsProximity() ? false : document.getElementById("distance-decay").checked,
       decayRate: isCustom
         ? parseFloat(document.getElementById("cc-decay_rate").value)
         : dd.rate,
@@ -52,6 +52,17 @@ async function loadJSON(path) {
 
 // Keys that are spatial adjustment parameters, not model coefficients
 var SPATIAL_KEYS = ["penalty_pct", "boost", "decay_rate"];
+
+// Modes where wind alignment and distance decay are baked into the regression
+// coefficients — post-hoc toggles would double-count the spatial effects
+var PROXIMITY_MODES = ["pittsburgh_proximity", "calvert_proximity"];
+
+function modeIsProximity() { return PROXIMITY_MODES.indexOf(APP.mode()) !== -1; }
+
+function syncToggleRow() {
+  var tr = document.querySelector(".toggle-row");
+  if (tr) tr.hidden = modeIsProximity();
+}
 
 var CC_LABELS = {
   "const": "Const (intercept)",
@@ -133,6 +144,7 @@ function wireControls() {
     var el = document.getElementById(id);
     if (el) el.addEventListener("input", function () {
       document.getElementById("custom-coeffs").hidden = (APP.mode() !== "custom");
+      syncToggleRow();
       APP._fire();
     });
   });
@@ -403,6 +415,7 @@ async function main() {
     document.getElementById("distance-decay").checked = APP.meta.distance_defaults.enabled;
   }
   wireControls();
+  syncToggleRow();
 
   mapPanelScaffold();
   wireLocateMapButton();
