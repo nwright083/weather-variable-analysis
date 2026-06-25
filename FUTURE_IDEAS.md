@@ -82,10 +82,32 @@
 
 ---
 
+## ✅ Completed (2026-06-25)
+
+### 7. Model Calibration Fixes & UI Simplification — Completed 2026-06-25
+**Scope:** `odor_forecast_core.py`, `generate_site.py`, `docs/app.js`, `docs/index.html`
+**What was done:**
+- **Calvert Proximity Model removed:** `calvert_proximity` mode exposed in dashboard, diagnosed as miscalibrated (const=+18.0 calibrated without proximity terms → ORI=96.5% on a typical nice day), and removed. `COEFFS_CALVERT_PROXIMITY` preserved in `odor_forecast_core.py` for reference only. Default mode reverted to `pittsburgh_proximity`.
+- **Precipitation coefficient fix:** Raw zip-day panel fit produced `precipitation=+6.66` (overfitting artifact — rain inflated ORI to 100% on heavy-rain days). Overridden with city-wide validated value of `−0.864070`. Preserves dry-day calibration entirely (precip=0 on most days). Raw value stored as `_PROX_PRECIP_RAW`. Result: zero days at ~100%, max ORI dropped from 100% to ~45%.
+- **Sidebar simplified:** Removed Spatial & Dispersion section (wind filter, continuous alignment, distance decay checkboxes) from sidebar. Preset modes use `windFilter=false`, `distanceDecay=false` — proximity regression terms handle spatial adjustment natively. Toggles only active in Custom mode via Spatial Adjustments sliders.
+- **Mini-maps on 16-Day & 30-Day tabs:** Replaced `<select>` dropdowns with lazy-initialized Leaflet mini-maps (200px) that color tracts by ORI, support click-to-select, and include a "My Location" geolocation button.
+
+### 8. Calvert City Report → Coefficient Analyzer & Model Installer — Completed 2026-06-25
+**Scope:** `analyze_calvert_reports.py` (new), `odor_forecast_core.py`, `generate_site.py`
+**What was done:**
+- **New script:** `analyze_calvert_reports.py` — periodic tool to test whether any deployed coefficient (all 9 weather vars, wind_alignment, distance/exposure, precipitation_lag1) should be adjusted using real Calvert odor reports. Reads tester db + Google-Form responses CSV or published-sheet URL.
+- **Severity weighting:** Form's 1–5 severity used as sample weights in the fit (stronger smells count more, not just presence/absence).
+- **Two statistical modes:** Case-control (tester db has yes/no) or use-vs-availability (presence-only form: report days as "used", background climatology as "available" controls). Both produce logit coefficients on the deployed model's scale.
+- **Model generation & install loop:** 5-fold CV AUC comparison (candidate vs deployed), quality gates (min reports, AUC floor, AUC margin above deployed), interactive terminal prompt, writes `calvert_fitted_model.json` on accept.
+- **Forecaster auto-integration:** `odor_forecast_core.py` auto-loads `calvert_fitted_model.json` at import. `generate_site.py` exposes it as "Calvert City (Data-Fitted) — N reports" and makes it the default mode. No source edits required per fit. Removing the JSON + re-running `generate_site.py` reverts to `pittsburgh_proximity`.
+- **Open question tracked:** Calvert residents report odors after rain (contradicts Pittsburgh data). `precipitation_lag1` included as exploratory feature. Plan A+C: keep −0.864 now, collect data to settle empirically.
+
+---
+
 ## 🔧 In Progress
 
 ### Static Daily-Generated Forecast Website (GitHub Pages)
-**Status: LIVE** — deployed 2026-06-23. Extended and upgraded 2026-06-24 (see above).
+**Status: LIVE** — deployed 2026-06-23. Extended and upgraded 2026-06-24/25 (see above).
 - All core features complete. GitHub Actions cron regenerates daily at 06:00 UTC.
 
 ---

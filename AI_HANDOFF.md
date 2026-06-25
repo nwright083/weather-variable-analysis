@@ -267,6 +267,85 @@ A fully static daily-regenerated forecast website was built and deployed to GitH
 * `scratch/test_generate_site.py` — updated assertions for GEOID-keyed locations, `wind_alignment` float in cell, and new `pittsburgh_proximity` mode in meta.
 * **All 9 tests pass** (1 skipped — JS parity, Node absent locally; runs in CI).
 
+### 14. Model Calibration Fixes, UI Overhaul & Calvert Data Pipeline (2026-06-24 → 2026-06-25)
+
+#### Default Mode & Sidebar Cleanup
+* **`pittsburgh_proximity`** set as default mode (previously had been switched to `calvert_proximity` then reverted after calibration issue — see below).
+* **Spatial & Dispersion controls** (wind filter, continuous alignment, distance decay checkboxes) removed from the sidebar entirely. Those settings are now only active in Custom mode via the Spatial Adjustments sliders (`penalty_pct`, `boost`, `decay_rate`). For all preset modes, `windFilter=false` and `distanceDecay=false` — the proximity regression terms handle spatial adjustment natively.
+* **Custom coefficient panel** now has two sections: "Model Coefficients" (10 weather terms + `multi_source_exposure` + `wind_align_weighted`) and "Spatial Adjustments" (`penalty_pct`, `boost`, `decay_rate`).
+
+#### Calvert City Proximity Model — Calibration Issue & Fix
+* **`COEFFS_CALVERT_PROXIMITY` (created then removed from dashboard):** Attempted to combine `COEFFS_EST_CALVERT` weather terms (const=+18.0, calibrated WITHOUT proximity terms) with Pittsburgh's proximity regression terms (+2.07 z-contribution on average). This produced ORI=96.5% for a typical nice summer day (z=+3.32). The const in `COEFFS_EST_CALVERT` was calibrated assuming no proximity contribution; adding ~+2.07 z-units broke the intercept.
+* **Resolution:** Removed `calvert_proximity` from the dashboard dropdown. `COEFFS_CALVERT_PROXIMITY` is preserved in `odor_forecast_core.py` for reference only (not exposed). Default reverted to `pittsburgh_proximity`.
+* **Key lesson:** Never mix a regression intercept from model A with predictor coefficients from model B. The const is jointly estimated with all other terms and is not portable in isolation.
+
+#### Precipitation Coefficient Fix in `pittsburgh_proximity`
+* The raw zip-day panel fit produced `precipitation = +6.66` (positive — each inch of rain → ~780× odds). On heavy-rain days (3–4 inches) this term alone hit z=+20 to +26, saturating ORI to 100%.
+* **Root cause — zip-day panel overfitting:** The panel repeats city-wide weather for every ZIP on the same day. If rainy days coincided with complaint spikes for unrelated reasons, the amplified panel structure assigned the spike to precipitation. The city-wide daily model (one row per city-day) produced −0.864 (physically correct — rain scavenges odor).
+* **Fix:** Override `precipitation` in `COEFFS_PITTSBURGH_PROXIMITY` with −0.864070 (city-wide validated value). Safe because precip=0 on most days, so dry-day calibration (the jointly-fit intercept) is completely unchanged; only rainy-day behavior is corrected. Raw value preserved as `_PROX_PRECIP_RAW = 6.65637`.
+* **Result on Tract 401 (Livingston Co.), 32-day window:** before: 5 days at ~100%, 8 High, mean 36.3% → after: 0 at 100%, 0 High, mean 14.2%, max 45.5%.
+
+#### Debiasing Confirmed
+* Both `pittsburgh_proximity` and all other deployed modes are fully debiased: `dow_*` and `is_holiday` dummies are included during training (to control for reporting behavior) but stripped from the deployed coefficient dict. Confirmed by auditing `model_coeffs_pittsburgh.json` (has all 7 dummies) vs `COEFFS_PITTSBURGH_PROXIMITY` in `odor_forecast_core.py` (zero temporal dummies). Largest dummy effect was ~0.22 log-odds (modest).
+
+#### Mini-Maps on 16-Day & 30-Day Tabs
+* **`docs/app.js`** — replaced the `<select>` dropdowns on the 16-Day and 30-Day tabs with lazy-initialized Leaflet mini-maps (200px height). Mini-maps:
+  - Color census tracts by today's ORI (same color scheme as the main map tab).
+  - Allow click-to-select a tract; label updates to tract name.
+  - "My Location" geolocation button auto-selects the nearest census tract.
+  - Share `APP._mapState.geojson` with the main map tab via `ensureGeoJson()`.
+  - State tracked in `APP._locMaps` closures keyed by `"forecast"` / `"monthly"`.
+  - Lazy initialization via `buildLocSelectMap(tabKey)` — called only when the tab is first activated.
+
+#### Coefficient Audit Tool (full spread analysis)
+* Ran a complete term-by-term audit of `COEFFS_PITTSBURGH_PROXIMITY` against live data, measuring each term's actual z-contribution spread across all cells. Key finding: only precipitation was pathological (spread 48 log-odds units, wrong sign). All other coefficients had spreads of 0.15–6.3 and were physically defensible. Diurnal temperature range (spread 5.94) is the largest legitimate driver — physically correct (nocturnal inversion trapping).
+
+#### Calvert City Report → Coefficient Analyzer (`analyze_calvert_reports.py`)
+* **New script** at repo root. Run periodically once real Calvert odor reports accumulate to test whether any deployed coefficient (weather, wind_alignment, distance decay, precip) should be adjusted for Calvert's chemical-plant sources vs Pittsburgh's coke/steel works.
+* **Two data sources:** SQLite tester db (`calvert_tester_logs.db`, `reports` table with `odor_detected` yes/no) and/or Google-Form responses CSV / published-sheet URL (presence-only with severity 1–5).
+* **Two statistical modes auto-detected:**
+  - CASE-CONTROL: when `odor_detected` yes/no is present (tester db) → direct logistic regression.
+  - USE-vs-AVAILABILITY: presence-only (public form) → report days as "used", background climatology as "available" controls. Logit coefficients come out on the same scale as the deployed model for direct comparison.
+* **Severity weighting:** Public form's 1–5 severity now used as sample weights in the fit (stronger smells count more). NOT presence-only in the everyday sense (rich form with severity/symptoms/descriptions), but no recorded-absence rows, so use-vs-availability design is retained.
+* **Weather fetch:** ERA5 archive via Open-Meteo for each report's coordinates + one prior day (for lag features). Results cached in `scratch/calvert_weather_cache.json`.
+* **Features tested:** All 9 weather terms + `multi_source_exposure` + `wind_alignment` + `precipitation_lag1` (the residents' "after rain" hypothesis). Univariate screen + multivariate logistic regression vs deployed coefficients, flagging sign flips and magnitude divergences with p-values.
+* **Model generation & install flow:**
+  1. 5-fold cross-validated AUC for a locally-fit severity-weighted model vs deployed `pittsburgh_proximity`.
+  2. Quality gates: `--install-min-reports` (default 50), `--auc-floor` (default 0.60), `--auc-margin` (default 0.02 beats deployed).
+  3. If all gates pass → interactive terminal prompt "Add this model to the forecaster? [y/N]". `--yes` / `--no` flags for non-interactive use.
+  4. On accept → writes `calvert_fitted_model.json` (only file the script ever modifies outside `scratch/`).
+* **Forecaster integration (zero source edits per fit):**
+  - `odor_forecast_core.py` auto-loads `calvert_fitted_model.json` at import → `COEFFS_CALVERT_FITTED` + `CALVERT_FITTED_META`.
+  - `generate_site.build_meta()` exposes it as `"calvert_fitted"` mode labeled `"Calvert City (Data-Fitted) — N reports"` and makes it the default when present.
+  - The three built-in models always remain available in the dropdown; the fitted model is additive.
+  - To remove: delete `calvert_fitted_model.json` + re-run `generate_site.py` → default reverts to `pittsburgh_proximity`.
+* **Usage:**
+  ```bash
+  .venv/bin/python analyze_calvert_reports.py                          # tester db only
+  .venv/bin/python analyze_calvert_reports.py --csv responses.csv      # + form CSV
+  .venv/bin/python analyze_calvert_reports.py --sheet-url "https://..." # + published sheet
+  .venv/bin/python analyze_calvert_reports.py --yes                    # auto-install if gates pass
+  ```
+
+#### Open Scientific Question: Calvert Post-Rain Odor
+* Calvert City residents reported strong odors **after rain**. Pittsburgh data shows the opposite (rain → fewer complaints, even lagged, Poisson p≈10⁻⁴²). Hypothesis: different source chemistry (chemical plants vs coke/steel) may genuinely produce different precipitation response.
+* **Decision (Plan A+C):** Keep `precipitation = −0.864` (physically correct for our only real dataset); collect Calvert data with `analyze_calvert_reports.py` to settle empirically. The analyzer includes `precipitation_lag1` as an exploratory feature specifically to test the residents' claim.
+
+#### Directory Structure Updates
+```
+├── analyze_calvert_reports.py   # NEW — periodic report→coefficient analyzer & model installer
+├── calvert_fitted_model.json    # OPTIONAL (not committed) — written by analyzer on user accept
+├── odor_forecast_core.py        # UPDATED — COEFFS_PITTSBURGH_PROXIMITY precip fixed (-0.864);
+│                                #   COEFFS_CALVERT_FITTED auto-loader; CALVERT_FITTED_META
+│                                #   _PROX_PRECIP_RAW preserved for reference
+├── generate_site.py             # UPDATED — exposes calvert_fitted mode + meta when JSON present
+└── docs/
+    ├── app.js                   # UPDATED — mini-maps on 16-Day/30-Day tabs; My Location button;
+    │                            #   APP._locMaps; buildLocSelectMap(); ensureGeoJson();
+    │                            #   removed distance-decay/wind-filter toggle DOM refs
+    └── index.html               # UPDATED — removed Spatial & Dispersion section; no toggle-row
+```
+
 ---
-*Last updated: 2026-06-24 by Claude Sonnet — dual-model notebooks, census tracts, proximity mode, continuous wind alignment, mobile CSS, tests all passing*
+*Last updated: 2026-06-25 by Claude Opus 4.8 / Sonnet 4.6 — precip fix, calvert_proximity removed, mini-maps, analyzer+installer tool, all 9 tests passing*
 
