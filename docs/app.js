@@ -13,19 +13,30 @@ const APP = {
   _customCoeffs() {
     var c = {};
     Object.keys(this.meta.custom_slider_ranges).forEach(function (k) {
-      c[k] = parseFloat(document.getElementById("cc-" + k).value);
+      if (SPATIAL_KEYS.indexOf(k) === -1) {
+        c[k] = parseFloat(document.getElementById("cc-" + k).value);
+      }
     });
     return c;
   },
   opts() {
+    var isCustom = this.mode() === "custom";
+    var wd = this.meta.wind_defaults;
+    var dd = this.meta.distance_defaults;
     return {
       pressureOffset: this.meta.pressure_offset,
       windFilter: document.getElementById("wind-filter").checked,
       continuousAlignment: document.getElementById("continuous-alignment")?.checked ?? true,
-      penalty: 1 - (parseFloat(document.getElementById("penalty").value) / 100),
-      boost: parseFloat(document.getElementById("boost").value),
+      penalty: isCustom
+        ? 1 - (parseFloat(document.getElementById("cc-penalty_pct").value) / 100)
+        : 1 - (wd.penalty_pct / 100),
+      boost: isCustom
+        ? parseFloat(document.getElementById("cc-boost").value)
+        : wd.boost,
       distanceDecay: document.getElementById("distance-decay").checked,
-      decayRate: parseFloat(document.getElementById("decay-rate").value),
+      decayRate: isCustom
+        ? parseFloat(document.getElementById("cc-decay_rate").value)
+        : dd.rate,
     };
   },
   oriFor(cell) { return OdorModel.computeOri(cell, this.activeCoeffs(), this.opts()); },
@@ -39,6 +50,27 @@ async function loadJSON(path) {
 
 // ── Controls ─────────────────────────────────────────────────────────────────
 
+// Keys that are spatial adjustment parameters, not model coefficients
+var SPATIAL_KEYS = ["penalty_pct", "boost", "decay_rate"];
+
+var CC_LABELS = {
+  "const": "Const (intercept)",
+  "temperature": "Temperature",
+  "temperature_squared": "Temp²",
+  "solar_radiation": "Solar Radiation",
+  "relative_humidity": "Rel. Humidity",
+  "wind_speed": "Wind Speed",
+  "precipitation": "Precipitation",
+  "diurnal_temperature_range": "Diurnal Temp Range",
+  "boundary_layer_height": "Boundary Layer Ht",
+  "atmospheric_pressure": "Atm. Pressure",
+  "multi_source_exposure": "Source Exposure β",
+  "wind_align_weighted": "Wind Alignment β",
+  "penalty_pct": "Wind Penalty %",
+  "boost": "Wind Boost",
+  "decay_rate": "Decay Rate /mi",
+};
+
 function buildModeSelect() {
   var sel = document.getElementById("mode-select");
   Object.keys(APP.meta.mode_labels).forEach(function (key) {
@@ -47,31 +79,60 @@ function buildModeSelect() {
   });
   var custom = document.createElement("option"); custom.value = "custom"; custom.textContent = "Custom (manual)";
   sel.appendChild(custom);
-  sel.value = "estimated_calvert";
+  sel.value = APP.meta.default_mode || "pittsburgh_proximity";
 }
 
 function buildCustomCoeffSliders() {
   var box = document.getElementById("custom-coeffs");
   var ranges = APP.meta.custom_slider_ranges;
-  var defaults = APP.meta.coeffs.estimated_calvert;
-  Object.keys(ranges).forEach(function (k) {
-    var r = ranges[k];
+  var proxDefs = APP.meta.coeffs.pittsburgh_proximity || {};
+  var wd = APP.meta.wind_defaults;
+  var dd = APP.meta.distance_defaults;
+
+  function fmt(k, v) {
+    if (k === "penalty_pct") return Math.round(v) + "%";
+    if (k === "boost" || k === "decay_rate") return parseFloat(v).toFixed(2);
+    return parseFloat(v).toFixed(4);
+  }
+
+  function addSlider(k, r, defVal) {
+    var label = CC_LABELS[k] || k;
+    var valId = "cc-val-" + k;
     var wrap = document.createElement("label");
     wrap.style.fontSize = "0.78rem";
-    wrap.innerHTML = k + ' <input type="range" id="cc-' + k + '" min="' + r[0] + '" max="' + r[1] +
-      '" step="' + r[2] + '" value="' + defaults[k] + '">';
+    wrap.innerHTML = label + ' <span id="' + valId + '">' + fmt(k, defVal) + '</span>' +
+      '<input type="range" id="cc-' + k + '" min="' + r[0] + '" max="' + r[1] +
+      '" step="' + r[2] + '" value="' + defVal + '">';
+    wrap.querySelector("input").addEventListener("input", function () {
+      document.getElementById(valId).textContent = fmt(k, this.value);
+    });
     box.appendChild(wrap);
-  });
+  }
+
+  function sectionHead(text) {
+    var h = document.createElement("div");
+    h.className = "cc-section-head";
+    h.textContent = text;
+    box.appendChild(h);
+  }
+
+  sectionHead("Model Coefficients");
+  Object.keys(ranges).filter(function (k) { return SPATIAL_KEYS.indexOf(k) === -1; })
+    .forEach(function (k) {
+      addSlider(k, ranges[k], (proxDefs[k] != null) ? proxDefs[k] : 0);
+    });
+
+  sectionHead("Spatial Adjustments");
+  addSlider("penalty_pct", ranges.penalty_pct || [0, 100, 5], wd.penalty_pct);
+  addSlider("boost", ranges.boost || [1.0, 3.0, 0.05], wd.boost);
+  addSlider("decay_rate", ranges.decay_rate || [0.0, 0.5, 0.01], dd.rate);
 }
 
 function wireControls() {
-  var ids = ["mode-select", "wind-filter", "continuous-alignment", "penalty", "boost", "distance-decay", "decay-rate"];
-  ids.forEach(function (id) {
-    document.getElementById(id).addEventListener("input", function () {
+  ["mode-select", "wind-filter", "continuous-alignment", "distance-decay"].forEach(function (id) {
+    var el = document.getElementById(id);
+    if (el) el.addEventListener("input", function () {
       document.getElementById("custom-coeffs").hidden = (APP.mode() !== "custom");
-      document.getElementById("penalty-val").textContent = document.getElementById("penalty").value + "%";
-      document.getElementById("boost-val").textContent = parseFloat(document.getElementById("boost").value).toFixed(2);
-      document.getElementById("decay-rate-val").textContent = parseFloat(document.getElementById("decay-rate").value).toFixed(2);
       APP._fire();
     });
   });
@@ -340,8 +401,6 @@ async function main() {
   buildForecastLocSelect();
   if (APP.meta.distance_defaults) {
     document.getElementById("distance-decay").checked = APP.meta.distance_defaults.enabled;
-    document.getElementById("decay-rate").value = APP.meta.distance_defaults.rate;
-    document.getElementById("decay-rate-val").textContent = APP.meta.distance_defaults.rate.toFixed(2);
   }
   wireControls();
 

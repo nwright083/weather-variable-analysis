@@ -113,6 +113,15 @@ COEFFS_PITTSBURGH_PROXIMITY = {
     'wind_align_weighted': 1.6800007018699348,
 }
 
+# Calvert City Proximity-Enhanced: Calvert terrain-adjusted weather coefficients
+# (stronger wind_speed / boundary_layer_height sensitivity for flat rural terrain)
+# combined with Pittsburgh's empirically trained proximity regression terms.
+COEFFS_CALVERT_PROXIMITY = {
+    **COEFFS_EST_CALVERT,
+    'multi_source_exposure': COEFFS_PITTSBURGH_PROXIMITY['multi_source_exposure'],
+    'wind_align_weighted': COEFFS_PITTSBURGH_PROXIMITY['wind_align_weighted'],
+}
+
 
 def calculate_bearing(lat2, lon2):
     lat1, lon1 = IND_LAT, IND_LON

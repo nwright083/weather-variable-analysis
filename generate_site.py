@@ -83,20 +83,30 @@ def build_meta():
         "diurnal_temperature_range": [-0.5, 0.5, 0.001],
         "boundary_layer_height": [-0.005, 0.005, 0.00001],
         "atmospheric_pressure": [-0.1, 0.1, 0.001],
+        # Proximity regression terms (active when coefficients are non-zero in custom mode)
+        "multi_source_exposure": [-5.0, 20.0, 0.1],
+        "wind_align_weighted": [-5.0, 5.0, 0.05],
+        # Post-hoc spatial adjustment parameters (shown in custom mode Spatial Adjustments section)
+        "penalty_pct": [0, 100, 5],
+        "boost": [1.0, 3.0, 0.05],
+        "decay_rate": [0.0, 0.5, 0.01],
     }
     return {
         "generated_utc": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "source": "Open-Meteo (NWP + ERA5)",
         "pressure_offset": core.PRESSURE_ELEVATION_OFFSET,
+        "default_mode": "pittsburgh_proximity",
         "coeffs": {
             "estimated_calvert": core.COEFFS_EST_CALVERT,
             "exact_pittsburgh": core.COEFFS_PITTSBURGH,
             "pittsburgh_proximity": core.COEFFS_PITTSBURGH_PROXIMITY,
+            "calvert_proximity": core.COEFFS_CALVERT_PROXIMITY,
         },
         "mode_labels": {
             "estimated_calvert": "Estimated Calvert City",
             "exact_pittsburgh": "Exact Pittsburgh Model",
             "pittsburgh_proximity": "Pittsburgh Proximity-Enhanced",
+            "calvert_proximity": "Calvert City Proximity-Enhanced",
         },
         "custom_slider_ranges": custom_ranges,
         "wind_defaults": {"filter": True, "penalty_pct": 75, "boost": 1.0, "continuous_mode": True},

@@ -28,28 +28,10 @@
         <select id="mode-select"></select>
       </label>
       <div id="custom-coeffs" class="custom-coeffs" hidden></div>
-      <hr />
-      <h4>Spatial & Dispersion</h4>
-      
-      <div class="control-group">
-        <label class="toggle"><input type="checkbox" id="wind-filter" checked /> Wind Corridor Filter</label>
-        <div class="control-row">
-          <label class="toggle"><input type="checkbox" id="continuous-alignment" checked /> Continuous Alignment</label>
-          <span class="hint">Cosine-based (0–1) instead of on/off sectors</span>
-        </div>
-        <label>Penalty (Non-Corridor) <span id="penalty-val">75%</span>
-          <input type="range" id="penalty" min="0" max="100" step="5" value="75" />
-        </label>
-        <label>Boost (Corridor-Aligned) <span id="boost-val">1.00</span>
-          <input type="range" id="boost" min="1" max="3" step="0.05" value="1" />
-        </label>
-      </div>
-
-      <div class="control-group">
-        <label class="toggle"><input type="checkbox" id="distance-decay" checked /> Distance Decay</label>
-        <label>Decay Rate (per mile) <span id="decay-rate-val">0.02</span>
-          <input type="range" id="decay-rate" min="0.00" max="0.50" step="0.01" value="0.02" />
-        </label>
+      <div class="toggle-row">
+        <label class="toggle-chip"><input type="checkbox" id="wind-filter" checked /> Wind Filter</label>
+        <label class="toggle-chip"><input type="checkbox" id="continuous-alignment" checked /> Continuous</label>
+        <label class="toggle-chip"><input type="checkbox" id="distance-decay" checked /> Dist. Decay</label>
       </div>
     </aside>
 
