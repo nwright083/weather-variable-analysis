@@ -91,21 +91,36 @@ def build_meta():
         "boost": [1.0, 3.0, 0.05],
         "decay_rate": [0.0, 0.5, 0.01],
     }
+    coeffs = {
+        "estimated_calvert": core.COEFFS_EST_CALVERT,
+        "exact_pittsburgh": core.COEFFS_PITTSBURGH,
+        "pittsburgh_proximity": core.COEFFS_PITTSBURGH_PROXIMITY,
+    }
+    mode_labels = {
+        "estimated_calvert": "Estimated Calvert City",
+        "exact_pittsburgh": "Exact Pittsburgh Model",
+        "pittsburgh_proximity": "Pittsburgh Proximity-Enhanced",
+    }
+    default_mode = "pittsburgh_proximity"
+
+    # Expose a locally-fitted Calvert model if analyze_calvert_reports.py installed one.
+    if core.COEFFS_CALVERT_FITTED:
+        coeffs["calvert_fitted"] = core.COEFFS_CALVERT_FITTED
+        label = "Calvert City (Data-Fitted)"
+        meta = core.CALVERT_FITTED_META or {}
+        if meta.get("n_reports"):
+            label += f" — {meta['n_reports']} reports"
+        mode_labels["calvert_fitted"] = label
+        default_mode = "calvert_fitted"  # prefer the data-fitted model once it exists
+
     return {
         "generated_utc": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "source": "Open-Meteo (NWP + ERA5)",
         "pressure_offset": core.PRESSURE_ELEVATION_OFFSET,
-        "default_mode": "pittsburgh_proximity",
-        "coeffs": {
-            "estimated_calvert": core.COEFFS_EST_CALVERT,
-            "exact_pittsburgh": core.COEFFS_PITTSBURGH,
-            "pittsburgh_proximity": core.COEFFS_PITTSBURGH_PROXIMITY,
-        },
-        "mode_labels": {
-            "estimated_calvert": "Estimated Calvert City",
-            "exact_pittsburgh": "Exact Pittsburgh Model",
-            "pittsburgh_proximity": "Pittsburgh Proximity-Enhanced",
-        },
+        "default_mode": default_mode,
+        "coeffs": coeffs,
+        "mode_labels": mode_labels,
+        "fitted_meta": core.CALVERT_FITTED_META,
         "custom_slider_ranges": custom_ranges,
         "wind_defaults": {"filter": True, "penalty_pct": 75, "boost": 1.0, "continuous_mode": True},
         "distance_defaults": {"enabled": True, "rate": 0.02},

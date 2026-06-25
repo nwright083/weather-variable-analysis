@@ -4,6 +4,8 @@ Shared by the Streamlit app (calvert_odor_forecaster.py) and the static-site
 generator (generate_site.py). This module is the single source of truth for the
 model coefficients and the PRESSURE_ELEVATION_OFFSET.
 """
+import os
+import json
 import math
 import hashlib
 import datetime
@@ -128,6 +130,25 @@ COEFFS_CALVERT_PROXIMITY = {
     'multi_source_exposure': COEFFS_PITTSBURGH_PROXIMITY['multi_source_exposure'],
     'wind_align_weighted': COEFFS_PITTSBURGH_PROXIMITY['wind_align_weighted'],
 }
+
+# Optional locally-fitted Calvert City model, produced by analyze_calvert_reports.py
+# once enough real reports exist. The file is written ONLY when the user accepts an
+# install prompt; if present it is exposed in the dashboard as an extra mode. Its
+# const is pre-adjusted for the global PRESSURE_ELEVATION_OFFSET so it drops into the
+# same prediction path as the other models.
+FITTED_MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                 "calvert_fitted_model.json")
+COEFFS_CALVERT_FITTED = None
+CALVERT_FITTED_META = None
+if os.path.exists(FITTED_MODEL_PATH):
+    try:
+        with open(FITTED_MODEL_PATH) as _fh:
+            _fitted = json.load(_fh)
+        COEFFS_CALVERT_FITTED = {k: float(v) for k, v in _fitted["coefficients"].items()}
+        CALVERT_FITTED_META = {k: v for k, v in _fitted.items() if k != "coefficients"}
+    except Exception:
+        COEFFS_CALVERT_FITTED = None
+        CALVERT_FITTED_META = None
 
 
 def calculate_bearing(lat2, lon2):

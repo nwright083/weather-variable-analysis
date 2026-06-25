@@ -27,6 +27,14 @@ WHAT IT DOES
      odor_forecast_core.COEFFS_PITTSBURGH_PROXIMITY, flagging sign flips and large
      magnitude divergences (with p-values and a blunt sample-size caveat).
   5. Writes a CSV + JSON summary and prints a plain-language report.
+  6. GENERATES a candidate Calvert-fitted model (severity-weighted logistic fit),
+     cross-validates it against the deployed model, and — only if it clears the
+     quality gates (enough reports, AUC floor, beats deployed) — asks at the
+     terminal whether to install it. If you accept, it writes
+     calvert_fitted_model.json, which odor_forecast_core auto-loads and
+     generate_site exposes as a new "Calvert City (Data-Fitted)" dashboard mode
+     (and makes it the default). Re-run generate_site.py to rebuild, then commit
+     the JSON. Use --yes to skip the prompt, --no to analyze without installing.
 
 ──────────────────────────────────────────────────────────────────────────────
 USAGE
@@ -265,6 +273,7 @@ def build_used_available(reports, background_days, cache):
         daily["precipitation_lag1"] = daily["precipitation"].shift(1)
 
         report_day_set = set(grp["date"])
+        sev_by_date = grp.groupby("date")["severity"].max().to_dict()
         if case_control:
             label_by_date = dict(zip(grp["date"], grp["odor_detected"]))
             sub = daily[daily["date"].isin(report_day_set)].copy()
@@ -272,6 +281,7 @@ def build_used_available(reports, background_days, cache):
         else:
             daily["used"] = daily["date"].isin(report_day_set).astype(int)
             sub = daily
+        sub["severity"] = sub["date"].map(sev_by_date)  # NaN on control days
         rows.append(sub)
 
     if not rows:
@@ -372,6 +382,167 @@ def multivariate_fit(tbl, min_reports):
     return pd.DataFrame(rows)
 
 
+# ── Model generation, validation & install ─────────────────────────────────────
+
+# Features that map onto the DEPLOYED model's coefficients (drop diagnostics-only
+# distance_from_source and precipitation_lag1). wind_alignment → wind_align_weighted.
+MODEL_FIT_FEATURES = WEATHER_FEATURES + ["multi_source_exposure", "wind_alignment"]
+
+
+def _modeling_frame(tbl):
+    d = tbl[MODEL_FIT_FEATURES + ["used", "severity"]].copy()
+    d[MODEL_FIT_FEATURES] = d[MODEL_FIT_FEATURES].apply(pd.to_numeric, errors="coerce")
+    return d.dropna(subset=MODEL_FIT_FEATURES + ["used"]).reset_index(drop=True)
+
+
+def _sample_weights(y, severity):
+    """Controls weight 1; odor days weighted by reported severity (default 3 if blank)."""
+    sev = pd.to_numeric(severity, errors="coerce").fillna(3.0).to_numpy()
+    w = np.ones(len(y))
+    w[y == 1] = sev[y == 1]
+    return w
+
+
+def _deployed_z(d, coeffs, offset):
+    z = np.full(len(d), coeffs.get("const", 0.0), dtype=float)
+    for f in WEATHER_FEATURES:
+        col = d[f].to_numpy()
+        if f == "atmospheric_pressure":
+            z += coeffs.get(f, 0.0) * (col - offset)
+        else:
+            z += coeffs.get(f, 0.0) * col
+    z += coeffs.get("multi_source_exposure", 0.0) * d["multi_source_exposure"].to_numpy()
+    z += coeffs.get("wind_align_weighted", 0.0) * d["wind_alignment"].to_numpy()
+    return z
+
+
+def crossval_compare(tbl, offset, n_splits=5):
+    """5-fold CV AUC for a locally-fit model vs the deployed model on the same data."""
+    from sklearn.model_selection import StratifiedKFold
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.metrics import roc_auc_score
+
+    d = _modeling_frame(tbl)
+    y = d["used"].astype(int).to_numpy()
+    if y.sum() < 4 or (y == 0).sum() < 4:
+        return None
+    splits = min(n_splits, int(y.sum()))
+    skf = StratifiedKFold(n_splits=splits, shuffle=True, random_state=0)
+    X = d[MODEL_FIT_FEATURES]
+    cand = np.zeros(len(d))
+    for tr, te in skf.split(X, y):
+        sc = StandardScaler().fit(X.iloc[tr])
+        w = _sample_weights(y[tr], d["severity"].iloc[tr])
+        clf = LogisticRegression(class_weight="balanced", max_iter=1000)
+        clf.fit(sc.transform(X.iloc[tr]), y[tr], sample_weight=w)
+        cand[te] = clf.decision_function(sc.transform(X.iloc[te]))
+    dep = _deployed_z(d, core.COEFFS_PITTSBURGH_PROXIMITY, offset)
+    return float(roc_auc_score(y, cand)), float(roc_auc_score(y, dep)), int(y.sum()), len(d)
+
+
+def fit_full_model(tbl, offset):
+    """Fit on ALL data; return a deployable coefficient dict (offset pre-baked)."""
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.preprocessing import StandardScaler
+
+    d = _modeling_frame(tbl)
+    y = d["used"].astype(int).to_numpy()
+    X = d[MODEL_FIT_FEATURES]
+    sc = StandardScaler().fit(X)
+    w = _sample_weights(y, d["severity"])
+    clf = LogisticRegression(class_weight="balanced", max_iter=1000).fit(
+        sc.transform(X), y, sample_weight=w)
+
+    coef_std = clf.coef_[0]
+    means, scales = sc.mean_, sc.scale_
+    coef_raw = coef_std / scales
+    const = float(clf.intercept_[0] - np.sum(coef_std * means / scales))
+
+    out = {"const": const}
+    for f, c in zip(MODEL_FIT_FEATURES, coef_raw):
+        key = "wind_align_weighted" if f == "wind_alignment" else f
+        out[key] = float(c)
+    # Frontend computes atmospheric_pressure*(pressure - offset); we fit on raw
+    # pressure, so fold the offset into the intercept for a drop-in coefficient set.
+    out["const"] += out.get("atmospheric_pressure", 0.0) * offset
+    return out
+
+
+def install_model(candidate, meta, assume_yes=False, assume_no=False):
+    print("\n" + "-" * 72)
+    print("PROPOSED DATA-FITTED CALVERT MODEL")
+    print("-" * 72)
+    for k, v in candidate.items():
+        print(f"  {k:<28}{v:+.6f}")
+    print(f"\n  Based on {meta['n_reports']} reports | "
+          f"CV-AUC {meta['cv_auc_candidate']:.3f} (deployed {meta['cv_auc_deployed']:.3f})")
+
+    if assume_no:
+        print("\n  --no specified — not installing.")
+        return False
+    if not assume_yes:
+        if not sys.stdin.isatty():
+            print("\n  Non-interactive shell. Re-run with --yes to install, or run "
+                  "interactively to get the prompt. Not installing.")
+            return False
+        try:
+            ans = input("\n  Add this model to the forecaster as a selectable mode? [y/N]: ")
+        except EOFError:
+            ans = ""
+        if ans.strip().lower() not in ("y", "yes"):
+            print("  Not installed.")
+            return False
+
+    payload = {**meta, "coefficients": candidate}
+    with open(core.FITTED_MODEL_PATH, "w") as fh:
+        json.dump(payload, fh, indent=2)
+    print(f"\n  ✅ Installed → {core.FITTED_MODEL_PATH}")
+    print("  Next: run  .venv/bin/python generate_site.py  to rebuild the dashboard,")
+    print("  then commit calvert_fitted_model.json. It appears as 'Calvert City "
+          "(Data-Fitted)' and becomes the default mode.")
+    return True
+
+
+def generate_and_offer(tbl, offset, args):
+    print("\n" + "=" * 72)
+    print("MODEL GENERATION  (can a Calvert-fitted model beat the deployed one?)")
+    print("=" * 72)
+    cv = crossval_compare(tbl, offset)
+    if cv is None:
+        print("  Not enough odor/control days for a cross-validated fit yet.")
+        return
+    cand_auc, dep_auc, n_odor, n_rows = cv
+    print(f"  Reports (odor days): {n_odor}   modeling rows: {n_rows}")
+    print(f"  Cross-validated AUC — candidate: {cand_auc:.3f}   deployed: {dep_auc:.3f}   "
+          f"Δ {cand_auc - dep_auc:+.3f}")
+
+    gates = {
+        f"reports ≥ {args.install_min_reports}": n_odor >= args.install_min_reports,
+        f"candidate AUC ≥ {args.auc_floor}": cand_auc >= args.auc_floor,
+        f"beats deployed by ≥ {args.auc_margin}": cand_auc >= dep_auc + args.auc_margin,
+    }
+    print("\n  Quality gates:")
+    for name, ok in gates.items():
+        print(f"    [{'PASS' if ok else 'FAIL'}] {name}")
+
+    if not all(gates.values()):
+        print("\n  → Gates not all passed — keeping the deployed model. Collect more "
+              "reports (or the local data simply isn't better) and re-run.")
+        return
+
+    candidate = fit_full_model(tbl, offset)
+    meta = {
+        "generated": dt.datetime.now().isoformat(timespec="seconds"),
+        "n_reports": n_odor,
+        "cv_auc_candidate": round(cand_auc, 4),
+        "cv_auc_deployed": round(dep_auc, 4),
+        "note": ("Fitted from local Calvert reports (use-vs-availability / case-control, "
+                 "severity-weighted). Const pre-adjusted for PRESSURE_ELEVATION_OFFSET."),
+    }
+    install_model(candidate, meta, assume_yes=args.yes, assume_no=args.no)
+
+
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main():
@@ -384,6 +555,14 @@ def main():
                     help="Control-day window for presence-only (use-availability) mode")
     ap.add_argument("--min-reports", type=int, default=30,
                     help="Min odor days before a multivariate regression is attempted")
+    ap.add_argument("--install-min-reports", type=int, default=50,
+                    help="Min odor days before offering to install a fitted model")
+    ap.add_argument("--auc-floor", type=float, default=0.60,
+                    help="Candidate must reach at least this cross-validated AUC")
+    ap.add_argument("--auc-margin", type=float, default=0.02,
+                    help="Candidate must beat the deployed model's AUC by at least this")
+    ap.add_argument("--yes", action="store_true", help="Install fitted model without prompting")
+    ap.add_argument("--no", action="store_true", help="Never install (analysis only)")
     ap.add_argument("--out", default=os.path.join(ROOT, "scratch", "calvert_analysis"))
     args = ap.parse_args()
 
@@ -450,6 +629,9 @@ def main():
               "(Calvert data is consistent with the deployed coefficients).")
         print("  → REMINDER: these are suggestions. Review p-values and sample size "
               "before editing odor_forecast_core.py. Nothing was changed automatically.")
+
+    # Try to generate a better Calvert-fitted model and offer to install it.
+    generate_and_offer(tbl, core.PRESSURE_ELEVATION_OFFSET, args)
 
     # Persist outputs
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
