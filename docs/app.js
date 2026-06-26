@@ -740,9 +740,11 @@ function renderMethodsTab() {
     'opposite, so we keep rain as odor-suppressing for now and are collecting local reports to settle it.</li>' +
     '<li>The <b>⏱️ Hourly tab</b> is a <b>qualitative within-day indicator</b>, not a calibrated per-hour probability. ' +
     'The deployed model is trained on daily aggregates; feeding instantaneous hourly values would violate the ' +
-    'train/inference feature-parity assumption. Instead, solar radiation, total precipitation, humidity, pressure, ' +
-    'and wind are all held at their daily aggregate values — only boundary-layer height (BLH) and temperature vary ' +
-    'hour by hour, reflecting the sub-daily inversion cycle. The curve is anchored to the calibrated daily ORI ' +
+    'train/inference feature-parity assumption. Instead, all features that don\'t vary sub-daily are held at ' +
+    'their daily aggregate: solar radiation (daily mean), total precipitation (daily sum), relative humidity, ' +
+    'atmospheric pressure, and wind (daily means), and diurnal temperature range (DTR = daily max−min, ' +
+    'constant by definition). Only <b>boundary-layer height (BLH)</b> and <b>temperature</b> vary hour by hour, ' +
+    'reflecting the sub-daily inversion cycle. The curve is anchored to the calibrated daily ORI ' +
     '(shown as a dashed line) to give it a meaningful reference point.</li>' +
     '</ul>' +
     '<p style="margin-bottom:0;font-size:0.85rem;color:#64748b;">Forecasts regenerate daily from Open-Meteo NWP data. Training data spans 2018–2026.</p>' +
@@ -892,11 +894,13 @@ function renderHourly() {
     '<div style="font-size:0.8rem;color:#64748b;background:#f8fafc;border:1px solid #e2e8f0;' +
     'border-radius:6px;padding:0.5rem 0.75rem;margin-top:0.5rem;line-height:1.5;">' +
     '<b>About this chart:</b> The deployed model is a <b>daily</b> logistic regression — it cannot produce ' +
-    'calibrated per-hour probabilities. This view holds weather inputs that don\'t vary sub-daily ' +
-    '(solar radiation, total precipitation, humidity, pressure, wind) at their <b>daily aggregate values</b>, ' +
-    'and only lets <b>boundary-layer height (BLH)</b> and <b>temperature</b> vary hour by hour. ' +
-    'The curve shows <em>when within the day</em> atmospheric trapping is most or least favorable, anchored to ' +
-    'the calibrated daily ORI (dashed line). It is a qualitative within-day indicator, not a probability.' +
+    'calibrated per-hour probabilities. This view holds all weather inputs that don\'t vary sub-daily at ' +
+    'their <b>daily aggregate values</b>: solar radiation (daily mean), total precipitation (daily sum), ' +
+    'relative humidity, atmospheric pressure, and wind speed/direction (daily means), and diurnal temperature ' +
+    'range (DTR = daily max−min, constant by definition). ' +
+    'Only <b>boundary-layer height (BLH)</b> and <b>temperature</b> vary hour by hour — the genuine sub-daily ' +
+    'inversion drivers. The curve shows <em>when within the day</em> atmospheric trapping is most or least ' +
+    'favorable, anchored to the calibrated daily ORI (dashed line). It is a qualitative within-day indicator, not a probability.' +
     '</div>';
 
   wrap.innerHTML =
