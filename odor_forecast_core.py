@@ -429,6 +429,53 @@ def fetch_forecasts(locations):
         return pd.concat(fallback_records, ignore_index=True), True
 
 
+def _apply_daily_aggregates_to_hourly(df, bearing, loc_name):
+    """Hold daily-natured features constant per date so only BLH/temperature vary sub-daily.
+
+    Overwrites solar_radiation (daily mean), precipitation (daily sum),
+    relative_humidity / atmospheric_pressure / wind_speed (daily means), and
+    wind_direction (daily circular vector-mean), then recomputes wind_alignment
+    and aligned from that daily direction.  Temperature and BLH are left
+    untouched — they are the genuine sub-daily inversion drivers.
+    """
+    df = df.copy()
+    df['_wu'] = np.cos(np.radians(df['wind_direction']))
+    df['_wv'] = np.sin(np.radians(df['wind_direction']))
+    day_agg = df.groupby('date').agg(
+        solar_daily=('solar_radiation', 'mean'),
+        precip_daily=('precipitation', 'sum'),
+        rh_daily=('relative_humidity', 'mean'),
+        pres_daily=('atmospheric_pressure', 'mean'),
+        wspd_daily=('wind_speed', 'mean'),
+        wu_daily=('_wu', 'mean'),
+        wv_daily=('_wv', 'mean'),
+    ).reset_index()
+    day_agg['wdir_daily'] = (
+        np.degrees(np.arctan2(day_agg['wv_daily'], day_agg['wu_daily'])) % 360
+    )
+    df = df.merge(
+        day_agg[['date', 'solar_daily', 'precip_daily', 'rh_daily',
+                 'pres_daily', 'wspd_daily', 'wdir_daily']],
+        on='date',
+    )
+    df['solar_radiation']      = df['solar_daily']
+    df['precipitation']        = df['precip_daily']
+    df['relative_humidity']    = df['rh_daily']
+    df['atmospheric_pressure'] = df['pres_daily']
+    df['wind_speed']           = df['wspd_daily']
+    df['wind_direction']       = df['wdir_daily']
+    df.drop(columns=['solar_daily', 'precip_daily', 'rh_daily',
+                     'pres_daily', 'wspd_daily', 'wdir_daily', '_wu', '_wv'],
+            inplace=True)
+    df['wind_alignment'] = df['wind_direction'].apply(
+        lambda wd: compute_continuous_wind_alignment(wd, bearing)
+    )
+    df['aligned'] = df['wind_direction'].apply(
+        lambda wd: check_wind_alignment(wd, loc_name)
+    )
+    return df
+
+
 def fetch_hourly_forecasts(locations):
     """Return (df, is_mock) of per-hour rows for all locations over 16 forecast days.
 
@@ -506,12 +553,7 @@ def fetch_hourly_forecasts(locations):
             df['location']            = loc_name
             df['distance_from_source'] = distance
             df['bearing_from_source'] = bearing
-            df['wind_alignment'] = df['wind_direction'].apply(
-                lambda wd: compute_continuous_wind_alignment(wd, bearing)
-            )
-            df['aligned'] = df['wind_direction'].apply(
-                lambda wd: check_wind_alignment(wd, loc_name)
-            )
+            df = _apply_daily_aggregates_to_hourly(df, bearing, loc_name)
 
             all_rows.append(df[[
                 'datetime', 'date', 'hour', 'loc_id', 'location',
@@ -588,7 +630,9 @@ def fetch_hourly_forecasts(locations):
                         'wind_alignment': wind_align,
                         'aligned': aligned,
                     })
-            all_rows.append(pd.DataFrame(rows))
+            loc_df = pd.DataFrame(rows)
+            loc_df = _apply_daily_aggregates_to_hourly(loc_df, bearing, loc_name)
+            all_rows.append(loc_df)
 
         return pd.concat(all_rows, ignore_index=True), True
 

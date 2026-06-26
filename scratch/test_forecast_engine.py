@@ -326,6 +326,36 @@ class TestCalvertOdorForecaster(unittest.TestCase):
             )
             self.assertGreater(float(unique_dtrs[0]), 0.0, msg="DTR must be positive")
 
+        # ── Daily-aggregate invariant ─────────────────────────────────────────
+        # Features that don't vary sub-daily must be constant across all 24 hours
+        # of each (loc_id, date) so the daily-trained coefficients always receive
+        # inputs within their training distribution.
+        daily_natured = [
+            'solar_radiation', 'precipitation', 'relative_humidity',
+            'atmospheric_pressure', 'wind_speed', 'wind_direction',
+        ]
+        for (loc_id, date), group in df.groupby(['loc_id', 'date']):
+            for col in daily_natured:
+                unique_vals = group[col].nunique()
+                self.assertEqual(
+                    unique_vals, 1,
+                    msg=f"{col} must be constant across all 24 hours of {date}/{loc_id}, "
+                        f"got {group[col].unique()}"
+                )
+
+        # Temperature and BLH must vary within at least one (loc_id, date) group
+        # (they are the genuine sub-daily inversion drivers)
+        temp_varies = any(
+            g['temperature'].nunique() > 1
+            for _, g in df.groupby(['loc_id', 'date'])
+        )
+        blh_varies = any(
+            g['boundary_layer_height'].nunique() > 1
+            for _, g in df.groupby(['loc_id', 'date'])
+        )
+        self.assertTrue(temp_varies, "Temperature should vary sub-daily in at least one group")
+        self.assertTrue(blh_varies, "BLH should vary sub-daily in at least one group")
+
         # Basic schema checks
         required_cols = {'datetime', 'date', 'hour', 'loc_id', 'temperature',
                          'solar_radiation', 'dtr', 'boundary_layer_height',

@@ -419,6 +419,51 @@ The two large Pittsburgh CSVs are git LFS tracked in Gitea (`origin`). Push to G
 #### Security
 The CDS API key was used to fetch ERA5 data and stored **only** in `~/.cdsapirc`. It was never written to any tracked file or commit. The user should rotate it at [cds.climate.copernicus.eu](https://cds.climate.copernicus.eu) after this session.
 
+### 17. Scientific Audit & Hourly Tab Reframe (2026-06-25)
+
+#### Audit conclusion
+Full audit of daily vs hourly inference paths before mentor handoff.
+
+**Daily path (Map / 16-Day / 30-Day): verified sound.** `fetch_forecasts` aggregates hourly weather into daily features using `precip:sum`, `solar:mean`, `temp:mean/min/max`, `rh:mean`, `pressure:mean`, `BLH:mean`, `DTR = max−min`, and circular vector-mean for wind direction — matching both training pipelines (`Odor_Complaint_Analysis_v2_debiased.py`, `Dual_Model_Proximity_Analysis.py`) exactly. No train/inference feature-parity violation on any daily tab.
+
+**Hourly tab: the one real problem.** `fetch_hourly_forecasts` was emitting instantaneous hourly values, and the browser fed them into the daily-trained coefficients. Two clear violations:
+- **Solar radiation**: instantaneous 0–620 W/m² vs the daily-mean range (~0–300 W/m²) the −0.016 coefficient was fit on → ~−10 log-odds at noon vs ~−3 in training. Artificially crushed midday risk.
+- **Precipitation**: single hour's rain vs the daily total the −0.91 coefficient was fit on.
+- **BLH / wind / RH**: all varying across a much wider range than their daily-mean training distributions.
+
+#### Fix: hold daily-natured features constant per day
+
+**`odor_forecast_core.py`**: New module-level helper `_apply_daily_aggregates_to_hourly(df, bearing, loc_name)` applies these overrides on each per-location hourly dataframe (both the live API branch and the synthetic mock fallback):
+- `solar_radiation` → daily **mean**
+- `precipitation` → daily **sum**
+- `relative_humidity`, `atmospheric_pressure`, `wind_speed` → daily **mean**
+- `wind_direction` → daily **circular vector-mean** (arctan2 on mean u/v components)
+- `wind_alignment` / `aligned` → recomputed from the daily direction (constant across the day)
+- **Left varying**: `temperature`, `boundary_layer_height` — the genuine sub-daily inversion drivers
+
+Result: every feature the model sees is within its training distribution; only BLH and temperature shape the intra-day curve.
+
+**`docs/app.js` `renderHourly`**:
+- Heading changed to "Relative trapping conditions through the day" (aria-label updated to match).
+- Y-axis values no longer show `%` (they're a relative index, not a probability).
+- Tooltips now show "index X.Y" (not "X.Y%"), surface temp + BLH as the two varying drivers, and label wind as "(daily)".
+- Strip cells show the index number without `%`.
+- Legend tiers relabeled: "Favorable <15 / Moderate 15–30 / Elevated 30–50 / High ≥50" (no `%`).
+- **Dashed daily-ORI anchor line** drawn across the SVG at the day's calibrated ORI from `APP.forecast`, labeled "Daily ORI X.X%".
+- **Caveat box** below the chart explains: daily model, what's held constant, what varies, that the curve is a qualitative within-day indicator.
+
+**`docs/app.js` `renderMethodsTab` limitations card**:
+Added a fourth bullet explicitly describing the hourly tab's qualitative nature, the train/inference parity fix, and what's held vs. varied.
+
+#### Tests
+Extended `test_hourly_dtr_attached_to_all_hours` in `scratch/test_forecast_engine.py`:
+- Asserts `solar_radiation`, `precipitation`, `relative_humidity`, `atmospheric_pressure`, `wind_speed`, `wind_direction` are all **constant** across all 24 hours of every (loc_id, date) group.
+- Asserts `temperature` and `boundary_layer_height` **vary** within at least one group.
+- All 13 tests pass.
+
+#### Verified in generated data
+`docs/data/hourly.json` confirmed: for 24 hours of a sample location/date, all 5 daily-natured features have exactly 1 unique value; temperature has 22 unique values; BLH has 23 unique values.
+
 ---
-*Last updated: 2026-06-25 by Claude Sonnet 4.6 — ERA5 BLH backfill, model re-fit, validation charts, 13 tests passing*
+*Last updated: 2026-06-25 by Claude Sonnet 4.6 — Scientific audit, hourly tab reframe as qualitative relative indicator, 13 tests passing*
 

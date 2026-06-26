@@ -738,6 +738,12 @@ function renderMethodsTab() {
     'a low-risk day can still smell if there\'s a large release.</li>' +
     '<li>An <b>open question</b>: some residents report stronger odors after rain. The Pittsburgh data shows the ' +
     'opposite, so we keep rain as odor-suppressing for now and are collecting local reports to settle it.</li>' +
+    '<li>The <b>⏱️ Hourly tab</b> is a <b>qualitative within-day indicator</b>, not a calibrated per-hour probability. ' +
+    'The deployed model is trained on daily aggregates; feeding instantaneous hourly values would violate the ' +
+    'train/inference feature-parity assumption. Instead, solar radiation, total precipitation, humidity, pressure, ' +
+    'and wind are all held at their daily aggregate values — only boundary-layer height (BLH) and temperature vary ' +
+    'hour by hour, reflecting the sub-daily inversion cycle. The curve is anchored to the calibrated daily ORI ' +
+    '(shown as a dashed line) to give it a meaningful reference point.</li>' +
     '</ul>' +
     '<p style="margin-bottom:0;font-size:0.85rem;color:#64748b;">Forecasts regenerate daily from Open-Meteo NWP data. Training data spans 2018–2026.</p>' +
     '</div>';
@@ -758,7 +764,11 @@ function renderHourly() {
   var locId = _hourlyLocId;
   var date  = _hourlyDate;
 
-  // Gather 24 hours of computed ORI values
+  // Calibrated daily ORI anchor (from daily model — shown as reference line)
+  var dailyCell = (APP.forecast.features[date] || {})[locId];
+  var dailyOri  = dailyCell ? APP.oriFor(dailyCell) : null;
+
+  // Gather 24 hours of computed relative-index values
   var hours = [];
   for (var h = 0; h < 24; h++) {
     var dt   = date + 'T' + (h < 10 ? '0' : '') + h + ':00';
@@ -792,7 +802,7 @@ function renderHourly() {
     var y = vy(v);
     return '<line x1="' + PL + '" y1="' + y + '" x2="' + (PL + plotW) + '" y2="' + y +
       '" stroke="#e2e8f0" stroke-width="1"/>' +
-      '<text x="' + (PL - 4) + '" y="' + (y + 4) + '" text-anchor="end" font-size="9" fill="#94a3b8">' + v + '%</text>';
+      '<text x="' + (PL - 4) + '" y="' + (y + 4) + '" text-anchor="end" font-size="9" fill="#94a3b8">' + v + '</text>';
   }).join('');
 
   // Tier threshold dashed lines
@@ -819,25 +829,34 @@ function renderHourly() {
   var circlesSvg = valid.map(function(d) {
     var tier = OdorModel.getRiskTier(d.ori);
     var lbl  = d.h === 0 ? '12am' : d.h < 12 ? d.h + 'am' : d.h === 12 ? '12pm' : (d.h - 12) + 'pm';
-    var tip  = lbl + ': ' + d.ori.toFixed(1) + '%';
+    var tip  = lbl + ': index ' + d.ori.toFixed(1);
     if (d.cell) {
       tip += '\nTemp: ' + d.cell.temp.toFixed(1) + '°F';
-      tip += '\nWind: ' + d.cell.wind_speed.toFixed(1) + ' mph @ ' + Math.round(d.cell.wind_dir) + '°';
       tip += '\nBLH: ' + Math.round(d.cell.blh) + ' ft';
-      tip += '\nSolar: ' + Math.round(d.cell.solar) + ' W/m²';
+      tip += '\nWind (daily): ' + d.cell.wind_speed.toFixed(1) + ' mph @ ' + Math.round(d.cell.wind_dir) + '°';
     }
     return '<circle cx="' + hx(d.h) + '" cy="' + vy(d.ori) + '" r="3" ' +
       'fill="rgb(' + tier.rgb.join(',') + ')" stroke="#fff" stroke-width="1">' +
       '<title>' + tip + '</title></circle>';
   }).join('');
 
+  // Dashed daily-ORI anchor line
+  var refLineSvg = '';
+  if (dailyOri !== null) {
+    var refY = vy(dailyOri);
+    refLineSvg =
+      '<line x1="' + PL + '" y1="' + refY + '" x2="' + (PL + plotW) + '" y2="' + refY +
+        '" stroke="#1e293b" stroke-width="1.5" stroke-dasharray="6,4"/>' +
+      '<text x="' + (PL + 4) + '" y="' + (refY - 3) + '" font-size="8.5" fill="#1e293b" font-weight="600">Daily ORI ' + dailyOri.toFixed(1) + '%</text>';
+  }
+
   var svg =
-    '<svg viewBox="0 0 ' + W + ' ' + H + '" class="hourly-chart" aria-label="Hourly ORI chart">' +
+    '<svg viewBox="0 0 ' + W + ' ' + H + '" class="hourly-chart" aria-label="Relative trapping conditions through the day">' +
     '<rect x="' + PL + '" y="' + PT + '" width="' + plotW + '" height="' + plotH + '" fill="#f8fafc"/>' +
     yGridSvg + threshSvg + xTicksSvg + xLabelsSvg +
     (areaPath ? '<path d="' + areaPath + '" fill="rgba(37,99,235,0.1)"/>' : '') +
     (linePath ? '<path d="' + linePath + '" fill="none" stroke="#2563eb" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>' : '') +
-    circlesSvg +
+    circlesSvg + refLineSvg +
     '<line x1="' + PL + '" y1="' + PT + '" x2="' + PL + '" y2="' + (PT + plotH) + '" stroke="#94a3b8" stroke-width="1"/>' +
     '<line x1="' + PL + '" y1="' + (PT + plotH) + '" x2="' + (PL + plotW) + '" y2="' + (PT + plotH) + '" stroke="#94a3b8" stroke-width="1"/>' +
     '</svg>';
@@ -847,13 +866,12 @@ function renderHourly() {
     var tier     = d.ori !== null ? OdorModel.getRiskTier(d.ori) : {rgb: [148, 163, 184]};
     var textCol  = (d.ori !== null && d.ori >= 15) ? '#fff' : '#334155';
     var hLbl     = d.h === 0 ? '12a' : d.h < 12 ? d.h + 'a' : d.h === 12 ? '12p' : (d.h - 12) + 'p';
-    var oriStr   = d.ori !== null ? d.ori.toFixed(0) + '%' : '—';
+    var oriStr   = d.ori !== null ? d.ori.toFixed(0) : '—';
     var tip = '';
     if (d.cell) {
       var full = d.h === 0 ? '12am' : d.h < 12 ? d.h + 'am' : d.h === 12 ? '12pm' : (d.h - 12) + 'pm';
-      tip = full + ': ' + (d.ori !== null ? d.ori.toFixed(1) + '%' : '—') +
-        ' | ' + d.cell.temp.toFixed(1) + '°F, ' + d.cell.wind_speed.toFixed(1) + ' mph @ ' +
-        Math.round(d.cell.wind_dir) + '°, BLH ' + Math.round(d.cell.blh) + 'ft';
+      tip = full + ': index ' + (d.ori !== null ? d.ori.toFixed(1) : '—') +
+        ' | Temp ' + d.cell.temp.toFixed(1) + '°F, BLH ' + Math.round(d.cell.blh) + 'ft';
     }
     return '<div class="hour-cell" style="background:rgb(' + tier.rgb.join(',') + ');color:' + textCol + ';" title="' + tip + '">' +
       '<div class="hour-cell-label">' + hLbl + '</div>' +
@@ -863,16 +881,29 @@ function renderHourly() {
 
   var legend =
     '<div class="hourly-legend">' +
-    '<span class="badge-pill badge-clear">Clear &lt;15%</span>' +
-    '<span class="badge-pill badge-moderate">Moderate 15–30%</span>' +
-    '<span class="badge-pill badge-elevated">Elevated 30–50%</span>' +
-    '<span class="badge-pill badge-high">High ≥50%</span>' +
+    '<span class="badge-pill badge-clear">Favorable &lt;15</span>' +
+    '<span class="badge-pill badge-moderate">Moderate 15–30</span>' +
+    '<span class="badge-pill badge-elevated">Elevated 30–50</span>' +
+    '<span class="badge-pill badge-high">High ≥50</span>' +
+    '<span style="font-size:0.72rem;color:#64748b;align-self:center;margin-left:0.3rem;">— Relative trapping index (BLH &amp; temperature driven)</span>' +
+    '</div>';
+
+  var caveat =
+    '<div style="font-size:0.8rem;color:#64748b;background:#f8fafc;border:1px solid #e2e8f0;' +
+    'border-radius:6px;padding:0.5rem 0.75rem;margin-top:0.5rem;line-height:1.5;">' +
+    '<b>About this chart:</b> The deployed model is a <b>daily</b> logistic regression — it cannot produce ' +
+    'calibrated per-hour probabilities. This view holds weather inputs that don\'t vary sub-daily ' +
+    '(solar radiation, total precipitation, humidity, pressure, wind) at their <b>daily aggregate values</b>, ' +
+    'and only lets <b>boundary-layer height (BLH)</b> and <b>temperature</b> vary hour by hour. ' +
+    'The curve shows <em>when within the day</em> atmospheric trapping is most or least favorable, anchored to ' +
+    'the calibrated daily ORI (dashed line). It is a qualitative within-day indicator, not a probability.' +
     '</div>';
 
   wrap.innerHTML =
+    '<p style="font-size:0.9rem;font-weight:600;color:#1e293b;margin:0 0 0.5rem;">Relative trapping conditions through the day</p>' +
     '<div class="hourly-chart-box">' + svg + '</div>' +
     '<div class="hour-strip">' + stripCells + '</div>' +
-    legend;
+    legend + caveat;
 }
 
 async function buildHourlyTab() {
