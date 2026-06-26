@@ -577,12 +577,36 @@ function renderMethodsTab() {
     '<li><b>Boundary-layer height (BLH)</b> — how high the air mixes. A low mixing height keeps odor concentrated near ' +
     'the surface. (DTR and BLH measure two sides of the same inversion physics.)</li>' +
     '<li><b>Wind speed</b> — stronger wind disperses odor and lowers risk.</li>' +
-    '<li><b>Temperature, humidity, solar radiation, pressure, precipitation</b> — secondary modifiers.</li>' +
+    '<li><b>Temperature</b> (with a quadratic term, °F²) <b>, humidity, solar radiation, pressure, precipitation</b> — secondary modifiers. The quadratic captures the non-linear curve: risk rises steeply outside a mid-range temperature window.</li>' +
     '</ul>' +
     '<p style="margin-bottom:0;font-size:0.85rem;color:#64748b;">Two corrections apply to every model: an ' +
     '<b>elevation pressure offset</b> (Pittsburgh sits ~250 m higher than Calvert, so pressures are shifted into the ' +
     'training frame), and <b>de-biasing</b> (day-of-week and holiday <i>reporting</i> patterns are stripped out so the ' +
     'score reflects weather, not when people happen to file reports).</p>' +
+    '</div>';
+
+  // Input variable table
+  html +=
+    '<div class="method-card">' +
+    '<h2>Model input variables</h2>' +
+    '<p style="font-size:0.88rem;color:#475569;margin-bottom:0.6rem;">All daily models use the same ten weather-derived features, computed as <b>daily aggregates</b> from the same hourly Open-Meteo feed. ' +
+    'Weather measurements come from the Open-Meteo NWP grid at the standard meteorological heights used by the ERA5 / ECMWF forecast system.</p>' +
+    '<table class="metrics-table">' +
+    '<thead><tr><th>Variable</th><th>Units / scale</th><th>Daily aggregate</th><th>Physical role</th></tr></thead>' +
+    '<tbody>' +
+    '<tr><td><b>Temperature</b></td><td>°F at 2 m above ground</td><td>Daily mean</td><td>Higher temp → increased volatility / diffusion</td></tr>' +
+    '<tr><td><b>Temperature² (quadratic)</b></td><td>°F² (derived)</td><td>Daily mean²</td><td>Captures the non-linear, U-shaped relationship between temp and odor risk</td></tr>' +
+    '<tr><td><b>Diurnal temperature range (DTR)</b></td><td>°F (daily max − min, 2 m)</td><td>Day range</td><td>Strongest single predictor — large swing = clear calm nights with strong inversions</td></tr>' +
+    '<tr><td><b>Boundary-layer height (BLH)</b></td><td>Feet (converted from m)</td><td>Daily mean</td><td>Mixing depth; low BLH traps odor near the surface</td></tr>' +
+    '<tr><td><b>Solar radiation</b></td><td>W/m² (shortwave, surface)</td><td>Daily mean</td><td>Drives daytime mixing; more sun → more convective turbulence → lower trapping</td></tr>' +
+    '<tr><td><b>Relative humidity</b></td><td>% at 2 m above ground</td><td>Daily mean</td><td>High humidity correlates with stable, stagnant air masses</td></tr>' +
+    '<tr><td><b>Wind speed</b></td><td>mph at 10 m above ground</td><td>Daily mean</td><td>Dispersion; stronger wind reduces concentration</td></tr>' +
+    '<tr><td><b>Wind direction → wind alignment</b></td><td>Degrees at 10 m; converted to alignment angle (°) with source bearing</td><td>Circular vector mean</td><td>Proximity model only: how directly the wind blows odor toward each census tract</td></tr>' +
+    '<tr><td><b>Precipitation</b></td><td>Inches (rain only)</td><td>Daily sum</td><td>Rain scrubs and suppresses odor in Pittsburgh data (open question for Calvert)</td></tr>' +
+    '<tr><td><b>Atmospheric pressure</b></td><td>hPa (surface); elevation-offset applied</td><td>Daily mean</td><td>Low pressure → unstable conditions; offset corrects Pittsburgh (~250 m) vs Calvert (~120 m) elevation difference</td></tr>' +
+    '</tbody></table>' +
+    '<p style="font-size:0.8rem;color:#64748b;margin-top:0.5rem;margin-bottom:0;">All variables are available from Open-Meteo\'s forecast API with no post-processing except unit conversions and the elevation pressure offset. ' +
+    'Training labels used Pittsburgh community smell-event reports (2018–2026) binarized by weighted odor burden.</p>' +
     '</div>';
 
   // Per-model cards
