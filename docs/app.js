@@ -762,14 +762,17 @@ function renderMethodsTab() {
     'a low-risk day can still smell if there\'s a large release.</li>' +
     '<li>An <b>open question</b>: some residents report stronger odors after rain. The Pittsburgh data shows the ' +
     'opposite, so we keep rain as odor-suppressing for now and are collecting local reports to settle it.</li>' +
-    '<li>The <b>⏱️ Hourly tab</b> is a <b>qualitative within-day indicator</b>, not a calibrated per-hour probability. ' +
-    'The deployed model is trained on daily aggregates; feeding instantaneous hourly values would violate the ' +
-    'train/inference feature-parity assumption. Instead, all features that don\'t vary sub-daily are held at ' +
-    'their daily aggregate: solar radiation (daily mean), total precipitation (daily sum), relative humidity, ' +
-    'atmospheric pressure, and wind (daily means), and diurnal temperature range (DTR = daily max−min, ' +
-    'constant by definition). Only <b>boundary-layer height (BLH)</b> and <b>temperature</b> vary hour by hour, ' +
-    'reflecting the sub-daily inversion cycle. The curve is anchored to the calibrated daily ORI ' +
-    '(shown as a dashed line) to give it a meaningful reference point.</li>' +
+    '<li>The <b>⏱️ Hourly tab</b> offers two views. <b>Default — Fitted hourly model (case-crossover):</b> ' +
+    'Coefficients were estimated from 8+ years of Pittsburgh reports by comparing odor-report hours to ' +
+    'non-report control hours within the same hour-of-day of the same calendar month. This design removes ' +
+    'diurnal reporting bias and the solar/hour collinearity by construction. Features used: temperature ' +
+    '(linear + quadratic), boundary-layer height, wind speed, relative humidity, atmospheric pressure, ' +
+    'and precipitation — all at raw hourly values. Solar radiation and DTR are excluded (absorbed by the ' +
+    'strata). Because the model has no intercept, the 24 within-day z-values are re-anchored so their mean ' +
+    'matches the calibrated daily ORI. <b>Comparison — Daily model (constant-input):</b> The original daily ' +
+    'logistic regression run on daily-aggregate inputs (solar daily-mean, precip daily-sum, RH/pressure/wind ' +
+    'daily means, DTR constant). Only BLH and temperature vary sub-daily. Both views are anchored to the ' +
+    'same dashed daily-ORI reference line.</li>' +
     '</ul>' +
     '<p style="margin-bottom:0;font-size:0.85rem;color:#64748b;">Forecasts regenerate daily from Open-Meteo NWP data. Training data spans 2018–2026.</p>' +
     '</div>';
@@ -790,17 +793,59 @@ function renderHourly() {
   var locId = _hourlyLocId;
   var date  = _hourlyDate;
 
+  // Tab-local model toggle
+  var modeRadio = document.querySelector('input[name="hourly-mode"]:checked');
+  var hourlyMode = modeRadio ? modeRadio.value : 'fitted';
+  var hc = APP.meta && APP.meta.hourly_coeffs;
+  var useFitted = (hourlyMode === 'fitted') && !!hc;
+
   // Calibrated daily ORI anchor (from daily model — shown as reference line)
   var dailyCell = (APP.forecast.features[date] || {})[locId];
   var dailyOri  = dailyCell ? APP.oriFor(dailyCell) : null;
 
-  // Gather 24 hours of computed relative-index values
+  // ── Compute per-hour ORI values ────────────────────────────────────────────
   var hours = [];
-  for (var h = 0; h < 24; h++) {
-    var dt   = date + 'T' + (h < 10 ? '0' : '') + h + ':00';
-    var cell = (APP.hourly.features[dt] || {})[locId];
-    var ori  = cell ? APP.oriFor(cell) : null;
-    hours.push({h: h, dt: dt, cell: cell, ori: ori});
+  var pressureOffset = (APP.meta && APP.meta.pressure_offset) || 0;
+
+  if (useFitted) {
+    // Fitted case-crossover model: compute raw z for each hour, then anchor
+    // so the 24-hour mean sits exactly on logit(dailyOri/100).
+    var zVals = [];
+    for (var h = 0; h < 24; h++) {
+      var dt   = date + 'T' + (h < 10 ? '0' : '') + h + ':00';
+      var cell = (APP.hourly.features[dt] || {})[locId];
+      zVals.push(cell ? OdorModel.hourlyZ(cell, hc, pressureOffset) : null);
+    }
+    var nonNull = zVals.filter(function(z) { return z !== null; });
+    var meanZ   = nonNull.length ? nonNull.reduce(function(a, b) { return a + b; }, 0) / nonNull.length : 0;
+    var logitD  = dailyOri !== null ? Math.log(Math.max(dailyOri, 0.01) / Math.max(100 - dailyOri, 0.01)) : meanZ;
+    var shift   = logitD - meanZ;
+    for (var h = 0; h < 24; h++) {
+      var dt   = date + 'T' + (h < 10 ? '0' : '') + h + ':00';
+      var cell = (APP.hourly.features[dt] || {})[locId];
+      var z    = zVals[h];
+      var ori  = z !== null ? Math.round((100 / (1 + Math.exp(-(z + shift)))) * 10) / 10 : null;
+      hours.push({h: h, dt: dt, cell: cell, ori: ori});
+    }
+  } else {
+    // Daily-constant-input fallback: substitute *_d fields for daily-natured features
+    // so the daily-trained coefficients receive daily-aggregate inputs as they were trained on.
+    for (var h = 0; h < 24; h++) {
+      var dt   = date + 'T' + (h < 10 ? '0' : '') + h + ':00';
+      var cell = (APP.hourly.features[dt] || {})[locId];
+      var ori  = null;
+      if (cell) {
+        var fc = {
+          temp: cell.temp, temp_sq: cell.temp_sq, blh: cell.blh, dtr: cell.dtr,
+          solar: cell.solar_d, rh: cell.rh_d, wind_speed: cell.wind_speed_d,
+          wind_dir: cell.wind_dir_d, precip: cell.precip_d, pressure: cell.pressure_d,
+          wind_alignment: cell.wind_alignment_d, aligned: cell.aligned_d,
+          distance: cell.distance,
+        };
+        ori = APP.oriFor(fc);
+      }
+      hours.push({h: h, dt: dt, cell: cell, ori: ori});
+    }
   }
 
   // SVG chart dimensions
@@ -859,7 +904,12 @@ function renderHourly() {
     if (d.cell) {
       tip += '\nTemp: ' + d.cell.temp.toFixed(1) + '°F';
       tip += '\nBLH: ' + Math.round(d.cell.blh) + ' ft';
-      tip += '\nWind (daily): ' + d.cell.wind_speed.toFixed(1) + ' mph @ ' + Math.round(d.cell.wind_dir) + '°';
+      if (useFitted) {
+        tip += '\nWind (raw): ' + d.cell.wind_speed.toFixed(1) + ' mph @ ' + Math.round(d.cell.wind_dir) + '°';
+        tip += '\nPrecip: ' + d.cell.precip.toFixed(3) + '"';
+      } else {
+        tip += '\nWind (daily avg): ' + (d.cell.wind_speed_d || 0).toFixed(1) + ' mph @ ' + Math.round(d.cell.wind_dir_d || 0) + '°';
+      }
     }
     return '<circle cx="' + hx(d.h) + '" cy="' + vy(d.ori) + '" r="3" ' +
       'fill="rgb(' + tier.rgb.join(',') + ')" stroke="#fff" stroke-width="1">' +
@@ -876,8 +926,9 @@ function renderHourly() {
       '<text x="' + (PL + 4) + '" y="' + (refY - 3) + '" font-size="8.5" fill="#1e293b" font-weight="600">Daily ORI ' + dailyOri.toFixed(1) + '%</text>';
   }
 
+  var svgAriaLabel = useFitted ? 'Hourly odor risk (fitted case-crossover model)' : 'Relative trapping conditions through the day';
   var svg =
-    '<svg viewBox="0 0 ' + W + ' ' + H + '" class="hourly-chart" aria-label="Relative trapping conditions through the day">' +
+    '<svg viewBox="0 0 ' + W + ' ' + H + '" class="hourly-chart" aria-label="' + svgAriaLabel + '">' +
     '<rect x="' + PL + '" y="' + PT + '" width="' + plotW + '" height="' + plotH + '" fill="#f8fafc"/>' +
     yGridSvg + threshSvg + xTicksSvg + xLabelsSvg +
     (areaPath ? '<path d="' + areaPath + '" fill="rgba(37,99,235,0.1)"/>' : '') +
@@ -905,30 +956,46 @@ function renderHourly() {
       '</div>';
   }).join('');
 
+  var legendSubtitle = useFitted
+    ? '— Fitted hourly model, anchored to daily ORI'
+    : '— Daily model (constant-input), BLH &amp; temp vary';
   var legend =
     '<div class="hourly-legend">' +
     '<span class="badge-pill badge-clear">Favorable &lt;15</span>' +
     '<span class="badge-pill badge-moderate">Moderate 15–30</span>' +
     '<span class="badge-pill badge-elevated">Elevated 30–50</span>' +
     '<span class="badge-pill badge-high">High ≥50</span>' +
-    '<span style="font-size:0.72rem;color:#64748b;align-self:center;margin-left:0.3rem;">— Relative trapping index (BLH &amp; temperature driven)</span>' +
+    '<span style="font-size:0.72rem;color:#64748b;align-self:center;margin-left:0.3rem;">' + legendSubtitle + '</span>' +
     '</div>';
 
-  var caveat =
-    '<div style="font-size:0.8rem;color:#64748b;background:#f8fafc;border:1px solid #e2e8f0;' +
-    'border-radius:6px;padding:0.5rem 0.75rem;margin-top:0.5rem;line-height:1.5;">' +
-    '<b>About this chart:</b> The deployed model is a <b>daily</b> logistic regression — it cannot produce ' +
-    'calibrated per-hour probabilities. This view holds all weather inputs that don\'t vary sub-daily at ' +
-    'their <b>daily aggregate values</b>: solar radiation (daily mean), total precipitation (daily sum), ' +
-    'relative humidity, atmospheric pressure, and wind speed/direction (daily means), and diurnal temperature ' +
-    'range (DTR = daily max−min, constant by definition). ' +
-    'Only <b>boundary-layer height (BLH)</b> and <b>temperature</b> vary hour by hour — the genuine sub-daily ' +
-    'inversion drivers. The curve shows <em>when within the day</em> atmospheric trapping is most or least ' +
-    'favorable, anchored to the calibrated daily ORI (dashed line). It is a qualitative within-day indicator, not a probability.' +
-    '</div>';
+  var caveat = useFitted
+    ? '<div style="font-size:0.8rem;color:#64748b;background:#f8fafc;border:1px solid #e2e8f0;' +
+      'border-radius:6px;padding:0.5rem 0.75rem;margin-top:0.5rem;line-height:1.5;">' +
+      '<b>Fitted hourly model (case-crossover):</b> Coefficients were estimated from 8+ years of Pittsburgh ' +
+      'smell reports by comparing odor-report hours to non-report control hours <em>within the same hour of the same calendar month</em>. ' +
+      'This removes diurnal reporting bias and the solar/hour-of-day collinearity. Features: temperature (with quadratic), ' +
+      'boundary-layer height, wind speed, humidity, atmospheric pressure, and precipitation — all at their raw hourly values. ' +
+      'Solar radiation and DTR are excluded (absorbed by the strata). ' +
+      'Because the model has no intercept, the 24 within-day values are <b>re-centered</b> so their mean matches the ' +
+      'calibrated daily ORI (dashed line). The shape is data-fitted; the level is the daily forecast.' +
+      '</div>'
+    : '<div style="font-size:0.8rem;color:#64748b;background:#f8fafc;border:1px solid #e2e8f0;' +
+      'border-radius:6px;padding:0.5rem 0.75rem;margin-top:0.5rem;line-height:1.5;">' +
+      '<b>Daily model — constant-input view:</b> The deployed model is a <b>daily</b> logistic regression. ' +
+      'This view holds all weather inputs that don\'t vary sub-daily at their <b>daily aggregate values</b>: ' +
+      'solar radiation (daily mean), total precipitation (daily sum), relative humidity, atmospheric pressure, ' +
+      'wind speed/direction (daily means), and DTR (daily max−min, constant by definition). ' +
+      'Only <b>boundary-layer height (BLH)</b> and <b>temperature</b> vary hour by hour. ' +
+      'The curve shows <em>when within the day</em> atmospheric trapping is most or least favorable, ' +
+      'anchored to the calibrated daily ORI (dashed line). It is a qualitative within-day indicator, not a probability.' +
+      '</div>';
+
+  var chartTitle = useFitted
+    ? 'Hourly odor risk (fitted case-crossover model)'
+    : 'Relative trapping conditions through the day';
 
   wrap.innerHTML =
-    '<p style="font-size:0.9rem;font-weight:600;color:#1e293b;margin:0 0 0.5rem;">Relative trapping conditions through the day</p>' +
+    '<p style="font-size:0.9rem;font-weight:600;color:#1e293b;margin:0 0 0.5rem;">' + chartTitle + '</p>' +
     '<div class="hourly-chart-box">' + svg + '</div>' +
     '<div class="hour-strip">' + stripCells + '</div>' +
     legend + caveat;
@@ -955,6 +1022,18 @@ async function buildHourlyTab() {
     return '<option value="' + d + '"' + (i === 0 ? ' selected' : '') + '>' + lbl + '</option>';
   }).join('');
 
+  var hasFittedModel = !!(APP.meta && APP.meta.hourly_coeffs);
+  var toggleHtml = hasFittedModel
+    ? '<div class="hourly-model-toggle" style="display:flex;gap:0.5rem;align-items:center;' +
+      'font-size:0.82rem;margin:0.25rem 0 0.5rem;">' +
+      '<span style="color:#475569;font-weight:500;">Model:</span>' +
+      '<label style="display:flex;gap:0.25rem;align-items:center;cursor:pointer;">' +
+      '<input type="radio" name="hourly-mode" value="fitted" checked> Fitted hourly (case-crossover)</label>' +
+      '<label style="display:flex;gap:0.25rem;align-items:center;cursor:pointer;">' +
+      '<input type="radio" name="hourly-mode" value="daily"> Daily model (constant-input)</label>' +
+      '</div>'
+    : '';
+
   panel.innerHTML =
     '<div class="loc-header">' +
     '  <button id="btn-locate-hourly" class="btn-locate-small">📍 My Location</button>' +
@@ -964,6 +1043,7 @@ async function buildHourlyTab() {
     '  </label>' +
     '</div>' +
     '<div id="hourly-loc-map" class="loc-select-map"></div>' +
+    toggleHtml +
     '<div id="hourly-chart-wrap"></div>';
 
   await ensureGeoJson();
@@ -1038,6 +1118,11 @@ async function buildHourlyTab() {
     _hourlyDate = this.value;
     renderHourlyLocMap();
     renderHourly();
+  });
+
+  // Hourly-model toggle (fitted vs daily constant-input)
+  panel.querySelectorAll('input[name="hourly-mode"]').forEach(function(radio) {
+    radio.addEventListener("change", renderHourly);
   });
 
   // My Location button

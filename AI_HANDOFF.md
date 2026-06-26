@@ -465,5 +465,84 @@ Extended `test_hourly_dtr_attached_to_all_hours` in `scratch/test_forecast_engin
 `docs/data/hourly.json` confirmed: for 24 hours of a sample location/date, all 5 daily-natured features have exactly 1 unique value; temperature has 22 unique values; BLH has 23 unique values.
 
 ---
-*Last updated: 2026-06-25 by Claude Sonnet 4.6 — Scientific audit, hourly tab reframe as qualitative relative indicator, 13 tests passing*
+
+### Section 18 — Fitted Hourly Model (Case-Crossover) as Second Hourly-Tab Choice
+*2026-06-25 — Claude Sonnet 4.6*
+
+#### Motivation
+
+The hourly tab previously used the daily model with daily-aggregate inputs (Section 17).
+That gives the right shape (only BLH + temperature vary) but the coefficients were never
+fitted to sub-daily data.  A new second tab choice uses coefficients fitted directly to
+hourly report timestamps.
+
+#### Model: Logit + hour-of-day & month fixed-effect dummies
+
+**Primary attempt**: statsmodels `ConditionalLogit` with strata = (year, month, hour-of-day).
+ConditionalLogit failed at the covariance step (large-dataset numerical issue).
+
+**Fallback (deployed)**: ordinary `Logit` with hour-of-day (0–23) and calendar-month (1–12)
+fixed-effect dummies.  Statistically equivalent when strata are large enough to avoid
+incidental-parameter bias; our strata average ~250 observations each (well above the threshold).
+
+The fixed effects absorb diurnal reporting behavior and the solar/hour-of-day collinearity,
+yielding genuine sub-daily meteorological coefficients.
+
+**Features**: temperature, temperature², BLH, wind_speed, relative_humidity,
+atmospheric_pressure, precipitation — all at raw hourly values.
+
+**Features omitted**: solar_radiation (absorbed by hour-of-day fixed effects),
+DTR (daily by construction).
+
+**All 7 coefficients significant (p < 0.001) with physically correct signs**:
+- temperature: +0.0845 (warm = more risk, quadratic −0.00038 = ceiling effect)
+- BLH: −0.000117 (higher BLH → more mixing → less risk ✓)
+- wind_speed: −0.0758 (more wind → dispersion → less risk ✓)
+- relative_humidity: −0.0198 (slight negative ✓)
+- atmospheric_pressure: +0.0141 (high pressure = inversions = more risk ✓)
+- precipitation: −2.215 (rain suppresses odors ✓)
+
+#### Anchoring at inference
+
+At inference the 24 hourly z-values are shifted so their mean maps to `logit(dailyORI/100)`,
+anchoring the within-day shape to the calibrated daily ORI without changing its level.
+
+#### Files changed (this session)
+
+**`Pittsburgh Data/Dual_Model_Proximity_Analysis.py` + `.ipynb`** — Section 8 added:
+8.1–8.3 data setup, 8.4 model fit, 8.5 robustness check, 8.6 four plots
+(`_section8A_hourly_forest.png`, `_section8B_hourly_vs_daily_coefs.png`,
+`_section8C_hourly_shape.png`, `_section8D_hourly_distributions.png`),
+8.7 exports `Pittsburgh Data/model_coeffs_hourly.json`
+
+**`odor_forecast_core.py`**:
+- `COEFFS_HOURLY` + `HOURLY_MODEL_META` loaded from `Pittsburgh Data/model_coeffs_hourly.json`
+- `_apply_daily_aggregates_to_hourly` refactored: raw hourly values **preserved**; parallel
+  `*_daily` companion columns added (`solar_radiation_daily`, `precipitation_daily`,
+  `relative_humidity_daily`, `atmospheric_pressure_daily`, `wind_speed_daily`,
+  `wind_direction_daily`, `wind_alignment_daily`, `aligned_daily`)
+- Raw `wind_alignment` + `aligned` computed from raw hourly wind direction
+
+**`generate_site.py`**:
+- `build_hourly_payload`: cells carry both raw (`solar`, `rh`, …) and daily (`solar_d`, `rh_d`, …) fields
+- `build_meta`: adds `meta["hourly_coeffs"]` + `meta["hourly_meta"]` (not in global dropdown)
+
+**`docs/model.js`**: `hourlyZ(cell, hc, pressureOffset)` — raw log-odds for hourly model
+
+**`docs/app.js`**:
+- Tab-local radio toggle "Fitted hourly [default]" vs "Daily model (constant-input)"
+- `renderHourly`: fitted path anchors 24 z-values; daily path uses `_d` fields via `APP.oriFor`
+- `renderMethodsTab` bullet updated to document both views
+
+**`scratch/test_forecast_engine.py`**: updated assertions — `*_daily` columns constant,
+raw values now vary, new schema includes `wind_alignment_daily`/`aligned_daily`
+
+**`scratch/test_generate_site.py`**: `_fake_hourly_df` extended; `required_keys` extended;
+new `test_build_meta_has_hourly_coeffs`; new `test_hourly_anchor_invariant`
+
+#### Test status
+**15/15 tests passing** (`test_forecast_engine.py` + `test_generate_site.py` + `test_js_model.py`)
+
+---
+*Last updated: 2026-06-25 by Claude Sonnet 4.6 — Fitted hourly case-crossover model, tab-local toggle, 15 tests passing*
 

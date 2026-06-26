@@ -326,16 +326,19 @@ class TestCalvertOdorForecaster(unittest.TestCase):
             )
             self.assertGreater(float(unique_dtrs[0]), 0.0, msg="DTR must be positive")
 
-        # ── Daily-aggregate invariant ─────────────────────────────────────────
-        # Features that don't vary sub-daily must be constant across all 24 hours
-        # of each (loc_id, date) so the daily-trained coefficients always receive
-        # inputs within their training distribution.
-        daily_natured = [
-            'solar_radiation', 'precipitation', 'relative_humidity',
-            'atmospheric_pressure', 'wind_speed', 'wind_direction',
+        # ── Daily-aggregate invariant (now via *_daily companion columns) ─────
+        # Raw hourly values (solar_radiation, precipitation, etc.) now vary so the
+        # fitted hourly model can read them.  The *_daily columns hold per-date
+        # aggregates for the daily-constant-input fallback view and MUST be constant.
+        daily_agg_cols = [
+            'solar_radiation_daily', 'precipitation_daily', 'relative_humidity_daily',
+            'atmospheric_pressure_daily', 'wind_speed_daily', 'wind_direction_daily',
         ]
+        for col in daily_agg_cols:
+            self.assertIn(col, df.columns,
+                          msg=f"Expected daily-aggregate companion column {col!r} in df")
         for (loc_id, date), group in df.groupby(['loc_id', 'date']):
-            for col in daily_natured:
+            for col in daily_agg_cols:
                 unique_vals = group[col].nunique()
                 self.assertEqual(
                     unique_vals, 1,
@@ -343,8 +346,14 @@ class TestCalvertOdorForecaster(unittest.TestCase):
                         f"got {group[col].unique()}"
                 )
 
+        # Raw daily-natured features should now vary sub-daily (fitted hourly model reads them)
+        raw_varies = any(
+            g['solar_radiation'].nunique() > 1
+            for _, g in df.groupby(['loc_id', 'date'])
+        )
+        self.assertTrue(raw_varies, "Raw solar_radiation should vary sub-daily in mock (diurnal curve)")
+
         # Temperature and BLH must vary within at least one (loc_id, date) group
-        # (they are the genuine sub-daily inversion drivers)
         temp_varies = any(
             g['temperature'].nunique() > 1
             for _, g in df.groupby(['loc_id', 'date'])
@@ -356,10 +365,11 @@ class TestCalvertOdorForecaster(unittest.TestCase):
         self.assertTrue(temp_varies, "Temperature should vary sub-daily in at least one group")
         self.assertTrue(blh_varies, "BLH should vary sub-daily in at least one group")
 
-        # Basic schema checks
+        # Basic schema checks (raw + daily-aggregate fields)
         required_cols = {'datetime', 'date', 'hour', 'loc_id', 'temperature',
-                         'solar_radiation', 'dtr', 'boundary_layer_height',
-                         'wind_alignment', 'aligned'}
+                         'solar_radiation', 'solar_radiation_daily', 'dtr',
+                         'boundary_layer_height', 'wind_alignment', 'aligned',
+                         'wind_alignment_daily', 'aligned_daily'}
         self.assertTrue(required_cols.issubset(set(df.columns)),
                         msg=f"Missing columns: {required_cols - set(df.columns)}")
 

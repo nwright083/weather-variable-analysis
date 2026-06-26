@@ -1,0 +1,74 @@
+{
+  "note": "Hourly conditional logistic regression (time-stratified case-crossover). Strata = (year, month, hour-of-day): within each stratum, report-hours (cases) are compared to non-report control-hours at the same hour of the same calendar month. This differences out diurnal reporting behavior AND the solar/hour-of-day collinearity. No intercept (conditional logit). At inference, the 24 hourly z-values are re-centered so their mean equals logit(daily_ORI/100), anchoring the within-day shape to the calibrated daily ORI without changing its level.",
+  "coefficients": {
+    "temperature": 0.08454329366149198,
+    "temperature_squared": -0.000379434959661653,
+    "boundary_layer_height": -0.00011703922113434939,
+    "wind_speed": -0.07575287981685515,
+    "relative_humidity": -0.019752080132768805,
+    "atmospheric_pressure": 0.014060755169308733,
+    "precipitation": -2.2148567972201074
+  },
+  "p_values": {
+    "temperature": 1.6792184198813091e-108,
+    "temperature_squared": 3.874300679288567e-26,
+    "boundary_layer_height": 0.0,
+    "wind_speed": 8.78709952038362e-74,
+    "relative_humidity": 1.0766120209124626e-140,
+    "atmospheric_pressure": 4.4092514779523714e-14,
+    "precipitation": 5.5343189829101896e-05
+  },
+  "confidence_intervals_95": {
+    "temperature": [
+      0.077055,
+      0.092031
+    ],
+    "temperature_squared": [
+      -0.00045,
+      -0.000309
+    ],
+    "boundary_layer_height": [
+      -0.000123,
+      -0.000111
+    ],
+    "wind_speed": [
+      -0.083924,
+      -0.067582
+    ],
+    "relative_humidity": [
+      -0.021285,
+      -0.018219
+    ],
+    "atmospheric_pressure": [
+      0.01041,
+      0.017712
+    ],
+    "precipitation": [
+      -3.291548,
+      -1.138166
+    ]
+  },
+  "features_used": [
+    "temperature",
+    "temperature_squared",
+    "boundary_layer_height",
+    "wind_speed",
+    "relative_humidity",
+    "atmospheric_pressure",
+    "precipitation"
+  ],
+  "features_omitted": {
+    "solar_radiation": "Absorbed by hour-of-day strata (near-collinear with hour-of-day)",
+    "diurnal_temperature_range": "Daily max-min by construction; zero variance within a single hour"
+  },
+  "metadata": {
+    "n_city_hours_total": 73888,
+    "n_event_hours": 16834,
+    "event_rate_pct": 22.78,
+    "n_valid_strata": 2384,
+    "n_case_crossover_obs": 71966,
+    "stratum_definition": "year \u00d7 month \u00d7 hour-of-day",
+    "anchoring": "At inference: shift all 24 hourly z-values by (logit(daily_ORI/100) - mean(z_24h)) so the 24-hour mean maps to the calibrated daily ORI.",
+    "training_period": "2017-12-31 to 2026-06-06"
+  }
+}

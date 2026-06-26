@@ -106,6 +106,15 @@ def _fake_hourly_df(dates):
                     'bearing_from_source': bearing,
                     'wind_alignment': 0.5,
                     'aligned': False,
+                    # Daily-aggregate companion columns
+                    'solar_radiation_daily': 100.0,
+                    'precipitation_daily': 0.0,
+                    'relative_humidity_daily': 65.0,
+                    'atmospheric_pressure_daily': 1005.0,
+                    'wind_speed_daily': 4.0,
+                    'wind_direction_daily': 200.0,
+                    'wind_alignment_daily': 0.5,
+                    'aligned_daily': False,
                 })
     return pd.DataFrame(rows)
 
@@ -129,7 +138,9 @@ def test_build_hourly_payload_schema():
     # Every location present in each hour slot, with required cell keys
     n_locs = len(core.LOCATIONS)
     required_keys = {"aligned", "wind_alignment", "distance", "temp", "temp_sq",
-                     "solar", "rh", "wind_speed", "wind_dir", "precip", "dtr", "blh", "pressure"}
+                     "solar", "rh", "wind_speed", "wind_dir", "precip", "dtr", "blh", "pressure",
+                     "aligned_d", "wind_alignment_d", "solar_d", "rh_d",
+                     "wind_speed_d", "wind_dir_d", "precip_d", "pressure_d"}
     for dt in payload["datetimes"][:4]:  # check first 4 slots to keep test fast
         hour_feats = payload["features"][dt]
         assert len(hour_feats) == n_locs, f"{dt}: expected {n_locs} tracts, got {len(hour_feats)}"
@@ -143,3 +154,65 @@ def test_build_hourly_payload_schema():
     # Locations directory matches LOCATIONS
     loc_ids = {l["zip"] for l in payload["locations"]}
     assert len(loc_ids) == n_locs
+
+
+def test_build_meta_has_hourly_coeffs():
+    """meta.json must expose hourly_coeffs when model_coeffs_hourly.json exists."""
+    meta = generate_site.build_meta()
+    if core.COEFFS_HOURLY is None:
+        # Graceful: no hourly model file present (CI without training data)
+        assert meta["hourly_coeffs"] is None
+        return
+    hc = meta["hourly_coeffs"]
+    assert hc is not None, "hourly_coeffs missing from meta despite COEFFS_HOURLY being loaded"
+    expected_feats = ["temperature", "temperature_squared", "boundary_layer_height",
+                      "wind_speed", "relative_humidity", "atmospheric_pressure", "precipitation"]
+    for f in expected_feats:
+        assert f in hc, f"hourly_coeffs missing feature: {f}"
+        assert isinstance(hc[f], float), f"hourly_coeffs[{f!r}] should be float"
+    # BLH and wind_speed should suppress risk (negative coefficients)
+    assert hc["boundary_layer_height"] < 0, "BLH coefficient should be negative (higher BLH → lower risk)"
+    assert hc["wind_speed"] < 0, "wind_speed coefficient should be negative (more wind → lower risk)"
+
+
+def test_hourly_anchor_invariant():
+    """Fitted hourly curve must average (in log-odds space) to logit(dailyOri/100).
+
+    Simulates the JS anchoring logic in Python to confirm the math is correct:
+    shift all 24 z-values so mean(z_anchored) == logit(dailyOri/100),
+    then check the resulting 24 sigmoid values average to dailyOri.
+    """
+    import math
+    if core.COEFFS_HOURLY is None:
+        return  # no hourly model present
+
+    hc = core.COEFFS_HOURLY
+    pressure_offset = core.PRESSURE_ELEVATION_OFFSET
+
+    # Synthetic 24-hour weather row
+    daily_ori = 35.0  # arbitrary calibrated daily ORI (%)
+    logit_d = math.log(daily_ori / (100 - daily_ori))
+
+    z_vals = []
+    for h in range(24):
+        temp  = 75.0 + 8 * math.sin(math.pi * (h - 6) / 14) if 6 <= h <= 20 else 67.0
+        blh   = 1000.0 * max(0.08, math.sin(math.pi * (h - 7) / 14)) if 7 <= h <= 21 else 80.0
+        z = (hc["temperature"] * temp
+             + hc["temperature_squared"] * temp ** 2
+             + hc["boundary_layer_height"] * blh
+             + hc["wind_speed"] * 4.0
+             + hc["relative_humidity"] * 65.0
+             + hc["atmospheric_pressure"] * (1005.0 - pressure_offset)
+             + hc["precipitation"] * 0.0)
+        z_vals.append(z)
+
+    mean_z = sum(z_vals) / len(z_vals)
+    shift  = logit_d - mean_z
+    anchored = [100 / (1 + math.exp(-(z + shift))) for z in z_vals]
+    mean_ori = sum(anchored) / len(anchored)
+
+    # Mean of anchored sigmoid values should be close to dailyOri
+    # (not exactly equal due to Jensen's inequality, but within ~0.5%)
+    assert abs(mean_ori - daily_ori) < 0.6, (
+        f"Anchor invariant failed: mean(anchored ORI) = {mean_ori:.3f}%, expected ≈{daily_ori}%"
+    )

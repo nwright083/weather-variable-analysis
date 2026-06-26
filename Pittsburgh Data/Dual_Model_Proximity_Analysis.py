@@ -741,5 +741,384 @@ print(f"  pittsburgh_proximity AUC={_pp_data['auc']:.4f}  pseudo-R²={_pp_data.g
 print(f"  estimated_calvert    AUC={_ec_data['auc']:.4f}  (hand-tuned; Pittsburgh eval only)")
 
 print("\n" + "=" * 70)
+print("SECTION 8 – Hourly Case-Crossover Model")
+print("=" * 70)
+
+# ── Why this approach ──────────────────────────────────────────────────────────
+# A naive hourly logistic regression would learn *when people are awake and
+# outside*, not when the atmosphere traps odor.  Two confounds dominate:
+#
+#   1. Diurnal reporting behavior: reports peak in afternoon/evening regardless
+#      of meteorology.  A naive model learns this curve, not the inversion cycle.
+#   2. Solar ≈ hour-of-day collinearity: solar radiation is a near-deterministic
+#      function of the hour, making its weather coefficient unidentifiable from
+#      behavioral/time-of-day effects.
+#
+# Time-stratified case-crossover (conditional logistic regression) eliminates
+# both confounds by construction.  Strata = (year, month, hour-of-day): within
+# each stratum we compare report-hours (cases) to non-report control-hours at
+# the *same hour of the same calendar month*.  Because cases and controls share
+# the identical hour-of-day, the diurnal behavior curve *and* the solar/hour
+# collinearity difference out.  What remains is pure within-hour meteorological
+# variance — BLH dropping, wind dying, humidity rising.
+#
+# Omitted features vs the daily model:
+#   solar_radiation        → absorbed by strata (hour-of-day fixed effect)
+#   diurnal_temperature_range → daily max−min by construction; zero variance
+#                              within a single hour; cannot contribute
+
+from statsmodels.discrete.conditional_models import ConditionalLogit as _CL
+
+HOURLY_FEATS = [
+    "temperature", "temperature_squared",
+    "boundary_layer_height", "wind_speed",
+    "relative_humidity", "atmospheric_pressure",
+    "precipitation",
+]
+
+# ── 8.1  City-hour panel ───────────────────────────────────────────────────────
+print("\n  8.1  Building city-hour panel …")
+
+_weather_h_cols = [
+    "temperature", "relative_humidity", "wind_speed",
+    "atmospheric_pressure", "solar_radiation",
+    "boundary_layer_height", "precipitation",
+]
+_weather_h_cols = [c for c in _weather_h_cols if c in df_raw.columns]
+
+_df_h = df_raw.copy()
+_df_h["_wob"] = _df_h["complaints"].fillna(0) * _df_h["smell_value_average"].fillna(0)
+
+_agg_h = {"complaints": "sum", "_wob": "sum"}
+for _c in _weather_h_cols:
+    _agg_h[_c] = "mean"
+
+_df_ch = _df_h.groupby("datetime").agg(_agg_h).reset_index()
+_df_ch.rename(columns={"_wob": "weighted_burden_h"}, inplace=True)
+_df_ch["datetime"]  = pd.to_datetime(_df_ch["datetime"])
+_df_ch["hour"]      = _df_ch["datetime"].dt.hour
+_df_ch["month"]     = _df_ch["datetime"].dt.month
+_df_ch["year"]      = _df_ch["datetime"].dt.year
+
+_burden_thresh = _df_ch["weighted_burden_h"].mean()
+_df_ch["is_event_h"] = (_df_ch["weighted_burden_h"] > _burden_thresh).astype(int)
+
+_n_total_h = len(_df_ch)
+_n_event_h = int(_df_ch["is_event_h"].sum())
+_ev_rate_h  = _n_event_h / _n_total_h * 100
+print(f"    City-hours : {_n_total_h:,} total | {_n_event_h:,} events ({_ev_rate_h:.1f}%)")
+
+# ── 8.2  Case-crossover strata ────────────────────────────────────────────────
+print("  8.2  Building strata (year × month × hour-of-day) …")
+
+_df_ch["stratum"] = (
+    _df_ch["year"].astype(str) + "_"
+    + _df_ch["month"].astype(str).str.zfill(2) + "_"
+    + _df_ch["hour"].astype(str).str.zfill(2)
+)
+
+# Keep only strata that contain both cases and controls
+_s_stats = _df_ch.groupby("stratum")["is_event_h"].agg(["sum", "count"])
+_valid_s  = _s_stats[(_s_stats["sum"] > 0) & (_s_stats["sum"] < _s_stats["count"])].index
+_df_cc    = _df_ch[_df_ch["stratum"].isin(_valid_s)].copy()
+
+_n_strata = _df_cc["stratum"].nunique()
+print(f"    Valid strata: {_n_strata:,}  |  CC dataset: {len(_df_cc):,} rows")
+
+# ── 8.3  Feature engineering ──────────────────────────────────────────────────
+_df_cc["temperature_squared"] = _df_cc["temperature"] ** 2
+# Keep hour + month for the FE-dummies fallback
+_cc_keep = HOURLY_FEATS + ["is_event_h", "stratum", "hour", "month"]
+_cc_keep = [c for c in _cc_keep if c in _df_cc.columns]
+_df_cc = _df_cc[_cc_keep].dropna()
+print(f"    After NaN drop: {len(_df_cc):,} rows, {_df_cc['stratum'].nunique():,} strata")
+
+_stratum_codes = pd.Categorical(_df_cc["stratum"]).codes
+
+# ── 8.4  Fit model: ConditionalLogit with fallback to Logit + FE dummies ──────
+# Primary: statsmodels ConditionalLogit (exact conditional MLE).
+# Fallback: ordinary Logit with hour-of-day + month fixed-effect dummies —
+# statistically equivalent for strata large enough to avoid incidental-parameter
+# bias (~100+ obs per stratum; ours average ~250).
+print("  8.4  Fitting model …")
+_cl_fit_ok  = False
+_fit_method = "unknown"
+_cl_coeffs  = {}
+_cl_pvals   = {}
+_cl_cis     = {}
+
+# ── Attempt 1: ConditionalLogit ───────────────────────────────────────────────
+try:
+    _cl_m = _CL(
+        endog=_df_cc["is_event_h"],
+        exog=_df_cc[HOURLY_FEATS],
+        groups=_stratum_codes,
+    )
+    _cl_r = _cl_m.fit(maxiter=300, method="bfgs", disp=False)
+    _cl_coeffs = _cl_r.params.to_dict()
+    # pvalues / conf_int can fail even when params succeed — isolate them
+    try:
+        _cl_pvals = _cl_r.pvalues.to_dict()
+        _ci_df    = _cl_r.conf_int()
+        _cl_cis   = {k: (float(_ci_df.loc[k, 0]), float(_ci_df.loc[k, 1]))
+                     for k in _cl_coeffs}
+    except Exception:
+        _cl_pvals = {}
+        _cl_cis   = {}
+    _cl_fit_ok  = True
+    _fit_method = "ConditionalLogit (year × month × hour-of-day strata)"
+    print(f"    ConditionalLogit: params extracted (CIs available: {bool(_cl_cis)})")
+except Exception as _e:
+    print(f"    ConditionalLogit failed ({_e}); falling back to Logit + FE dummies …")
+
+# ── Attempt 2: Logit with hour-of-day + month dummies (equivalent) ────────────
+if not _cl_fit_ok:
+    try:
+        _h_dummies  = pd.get_dummies(_df_cc["hour"],  prefix="h",  drop_first=True).astype(float)
+        _mo_dummies = pd.get_dummies(_df_cc["month"], prefix="mo", drop_first=True).astype(float)
+        _X_fe = pd.concat(
+            [_df_cc[HOURLY_FEATS].reset_index(drop=True),
+             _h_dummies.reset_index(drop=True),
+             _mo_dummies.reset_index(drop=True)],
+            axis=1,
+        )
+        _X_fe = sm.add_constant(_X_fe)
+        _logit_fe = sm.Logit(_df_cc["is_event_h"].reset_index(drop=True), _X_fe)
+        _res_fe   = _logit_fe.fit(maxiter=500, method="bfgs", disp=False)
+        _cl_coeffs = {f: float(_res_fe.params[f]) for f in HOURLY_FEATS
+                      if f in _res_fe.params.index}
+        _cl_pvals  = {f: float(_res_fe.pvalues[f]) for f in HOURLY_FEATS
+                      if f in _res_fe.pvalues.index}
+        _ci_df_fe  = _res_fe.conf_int()
+        _cl_cis    = {f: (float(_ci_df_fe.loc[f, 0]), float(_ci_df_fe.loc[f, 1]))
+                      for f in HOURLY_FEATS if f in _ci_df_fe.index}
+        _cl_fit_ok  = True
+        _fit_method = "Logit + hour-of-day & month fixed-effect dummies (fallback)"
+        print(f"    Fallback Logit converged (pseudo-R² = {_res_fe.prsquared:.4f})")
+    except Exception as _e2:
+        print(f"    Fallback also failed: {_e2}")
+
+if _cl_fit_ok:
+    print(f"    Method: {_fit_method}")
+    print(f"\n    {'Feature':<35} {'Coef':>9}  {'p-val':>7}  {'95% CI'}")
+    print(f"    {'-'*70}")
+    for _f in HOURLY_FEATS:
+        _co = _cl_coeffs.get(_f, float("nan"))
+        _pv = _cl_pvals.get(_f, float("nan"))
+        _lo, _hi = _cl_cis.get(_f, (float("nan"), float("nan")))
+        _sig = "*" if (not np.isnan(_pv) and _pv < 0.05) else " "
+        print(f"  {_sig} {_f:<35} {_co:+9.5f}  {_pv:7.4f}  [{_lo:+.5f}, {_hi:+.5f}]")
+
+# ── 8.5  Robustness: unconditional logit + hour dummies ───────────────────────
+print("\n  8.5  Robustness check (unconditional logit + hour-of-day dummies) …")
+_rob_coeffs = {}
+if HAS_SKLEARN:
+    _h_dummies = pd.get_dummies(_df_cc["stratum"].str[-2:].astype(int), prefix="h",
+                                 drop_first=True)
+    _X_rob = pd.concat([_df_cc[HOURLY_FEATS].reset_index(drop=True),
+                         _h_dummies.reset_index(drop=True)], axis=1)
+    _y_rob = _df_cc["is_event_h"].values
+    from sklearn.preprocessing import StandardScaler as _SS
+    from sklearn.linear_model import LogisticRegression as _LR
+    _sc     = _SS()
+    _X_robs = _sc.fit_transform(_X_rob)
+    _lr_r   = _LR(max_iter=500, C=1.0, solver="lbfgs").fit(_X_robs, _y_rob)
+    _feat_n = list(_X_rob.columns)
+    _rob_coeffs = {_f: float(_lr_r.coef_[0][_feat_n.index(_f)])
+                   for _f in HOURLY_FEATS if _f in _feat_n}
+    print("    Standardized coefficients (should match sign with ConditionalLogit):")
+    for _f in HOURLY_FEATS:
+        _c_rob = _rob_coeffs.get(_f, float("nan"))
+        _c_cl  = _cl_coeffs.get(_f, float("nan"))
+        _agree = "✓" if (not np.isnan(_c_rob) and not np.isnan(_c_cl)
+                         and np.sign(_c_rob) == np.sign(_c_cl)) else "?"
+        print(f"    {_agree}  {_f:<35} rob={_c_rob:+.4f}  CL={_c_cl:+.5f}")
+else:
+    print("    sklearn not available – skipping robustness check")
+
+# ── 8.6  Plots ────────────────────────────────────────────────────────────────
+print("\n  8.6  Generating plots …")
+
+# Plot A: Odds-ratio forest plot with 95% CIs
+if _cl_fit_ok:
+    _or_vals  = {f: np.exp(_cl_coeffs[f]) for f in HOURLY_FEATS if f in _cl_coeffs}
+    _or_lo    = {f: np.exp(_cl_cis[f][0]) for f in HOURLY_FEATS if f in _cl_cis}
+    _or_hi    = {f: np.exp(_cl_cis[f][1]) for f in HOURLY_FEATS if f in _cl_cis}
+    _feats_pl = [f for f in HOURLY_FEATS if f in _or_vals]
+    _labels   = [f.replace("_", " ").title() for f in _feats_pl]
+    _y_pos    = np.arange(len(_feats_pl))
+    _colors   = ["#ef4444" if _or_vals[f] > 1 else "#3b82f6" for f in _feats_pl]
+
+    fig, ax = plt.subplots(figsize=(9, 5))
+    ax.axvline(1.0, color="#94a3b8", linewidth=1.2, linestyle="--")
+    for _i, _f in enumerate(_feats_pl):
+        ax.errorbar(
+            _or_vals[_f], _y_pos[_i],
+            xerr=[[_or_vals[_f] - _or_lo[_f]], [_or_hi[_f] - _or_vals[_f]]],
+            fmt="o", color=_colors[_i], markersize=7, capsize=4, linewidth=1.8,
+        )
+        _pv = _cl_pvals.get(_f, 1.0)
+        _sig = "**" if _pv < 0.01 else ("*" if _pv < 0.05 else "")
+        ax.text(_or_hi[_f] * 1.01, _y_pos[_i], f"OR={_or_vals[_f]:.3f} {_sig}",
+                va="center", fontsize=8.5, color="#1e293b")
+    ax.set_yticks(_y_pos)
+    ax.set_yticklabels(_labels, fontsize=9)
+    ax.set_xlabel("Odds Ratio (per unit change)", fontsize=10)
+    ax.set_title("Hourly Case-Crossover: Odds Ratios for Odor-Event Hour\n"
+                 "(strata = year × month × hour-of-day; 95% CI)", fontsize=10)
+    ax.grid(axis="x", alpha=0.3)
+    plt.tight_layout()
+    _p8a = f"{PLOT_PREFIX}_section8A_hourly_forest.png"
+    plt.savefig(_p8a, dpi=120, bbox_inches="tight")
+    plt.show()
+    print(f"    Saved {_p8a}")
+
+# Plot B: Hourly vs daily coefficient comparison (shared features, standardized)
+_shared = [f for f in HOURLY_FEATS
+           if f in _cl_coeffs and f in _core.COEFFS_PITTSBURGH
+              and f not in ("temperature_squared",)]
+if _shared and HAS_SKLEARN:
+    # Standardize both sets of coefficients for comparison
+    # Use the city-hour data std for hourly, daily_zip std for daily
+    _std_h = {f: float(_df_cc[f].std()) for f in _shared if f in _df_cc.columns}
+    _std_d = {f: float(sub_full[f].std()) for f in _shared if f in sub_full.columns}
+
+    _coef_h_s = {f: _cl_coeffs[f] * _std_h.get(f, 1.0) for f in _shared}
+    _coef_d_s = {f: _core.COEFFS_PITTSBURGH[f] * _std_d.get(f, 1.0) for f in _shared}
+
+    _x = np.arange(len(_shared))
+    _bw = 0.35
+    _lbls_s = [f.replace("_", " ").title() for f in _shared]
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.bar(_x - _bw/2, [_coef_h_s[f] for f in _shared], _bw,
+           label="Hourly (case-crossover)", color="#3b82f6", alpha=0.85)
+    ax.bar(_x + _bw/2, [_coef_d_s[f] for f in _shared], _bw,
+           label="Daily (Pittsburgh model)", color="#f97316", alpha=0.85)
+    ax.axhline(0, color="black", linewidth=0.8)
+    ax.set_xticks(_x)
+    ax.set_xticklabels(_lbls_s, rotation=30, ha="right", fontsize=9)
+    ax.set_ylabel("Standardized coefficient (× 1 SD)", fontsize=10)
+    ax.set_title("Hourly vs Daily model: standardized coefficients\n"
+                 "(same sign = consistent direction across time scales)", fontsize=10)
+    ax.legend(fontsize=9)
+    ax.grid(axis="y", alpha=0.3)
+    plt.tight_layout()
+    _p8b = f"{PLOT_PREFIX}_section8B_hourly_vs_daily_coefs.png"
+    plt.savefig(_p8b, dpi=120, bbox_inches="tight")
+    plt.show()
+    print(f"    Saved {_p8b}")
+
+# Plot C: Mean within-day predicted shape — event vs non-event days
+if _cl_fit_ok:
+    # Compute raw z for every city-hour (pre-anchoring)
+    _df_ch2 = _df_ch.dropna(subset=[f for f in HOURLY_FEATS
+                                      if f not in ("temperature_squared",)]).copy()
+    _df_ch2["temperature_squared"] = _df_ch2["temperature"] ** 2
+    _z_h = sum(_cl_coeffs.get(f, 0) * _df_ch2[f] for f in HOURLY_FEATS
+               if f in _df_ch2.columns)
+    _df_ch2["z_hourly"] = _z_h
+
+    _mean_z_by_hour = _df_ch2.groupby(["is_event_h", "hour"])["z_hourly"].mean().unstack(0)
+
+    fig, ax = plt.subplots(figsize=(10, 4.5))
+    _hrs = list(range(24))
+    if 0 in _mean_z_by_hour.columns:
+        ax.plot(_hrs, [_mean_z_by_hour[0].get(h, np.nan) for h in _hrs],
+                color="#3b82f6", linewidth=2, label="Non-event hours (mean)")
+    if 1 in _mean_z_by_hour.columns:
+        ax.plot(_hrs, [_mean_z_by_hour[1].get(h, np.nan) for h in _hrs],
+                color="#ef4444", linewidth=2, label="Event hours (mean)")
+    ax.set_xticks(range(0, 24, 3))
+    ax.set_xticklabels(["12a","3a","6a","9a","12p","3p","6p","9p"], fontsize=9)
+    ax.set_xlabel("Hour of day (local time)", fontsize=10)
+    ax.set_ylabel("Mean raw log-odds (z, pre-anchor)", fontsize=10)
+    ax.set_title("Mean within-day predicted log-odds shape\n"
+                 "(case-crossover coefficients; anchored to daily ORI at inference)",
+                 fontsize=10)
+    ax.legend(fontsize=9)
+    ax.axhline(0, color="#94a3b8", linewidth=0.8, linestyle="--")
+    ax.grid(alpha=0.3)
+    plt.tight_layout()
+    _p8c = f"{PLOT_PREFIX}_section8C_hourly_shape.png"
+    plt.savefig(_p8c, dpi=120, bbox_inches="tight")
+    plt.show()
+    print(f"    Saved {_p8c}")
+
+# Plot D: Case vs control distributions for the three strongest features
+_top3 = sorted([f for f in HOURLY_FEATS if f in _df_cc.columns and f != "temperature_squared"],
+               key=lambda f: abs(_cl_coeffs.get(f, 0)), reverse=True)[:3]
+if _top3:
+    fig, axes = plt.subplots(1, 3, figsize=(13, 4))
+    for _ax, _f in zip(axes, _top3):
+        _cases = _df_cc[_df_cc["is_event_h"] == 1][_f].dropna()
+        _ctrls = _df_cc[_df_cc["is_event_h"] == 0][_f].dropna()
+        _ax.hist(_ctrls, bins=50, alpha=0.55, density=True, color="#3b82f6",
+                 edgecolor="white", label=f"Control (n={len(_ctrls):,})")
+        _ax.hist(_cases, bins=50, alpha=0.55, density=True, color="#ef4444",
+                 edgecolor="white", label=f"Case (n={len(_cases):,})")
+        _ax.set_xlabel(_f.replace("_", " ").title(), fontsize=9)
+        _ax.set_ylabel("Density", fontsize=9)
+        _ax.legend(fontsize=8)
+        _ax.grid(alpha=0.3)
+    axes[0].set_title("Case vs Control distributions — top 3 hourly drivers", fontsize=10)
+    plt.tight_layout()
+    _p8d = f"{PLOT_PREFIX}_section8D_hourly_distributions.png"
+    plt.savefig(_p8d, dpi=120, bbox_inches="tight")
+    plt.show()
+    print(f"    Saved {_p8d}")
+
+# ── 8.7  Export coefficients ──────────────────────────────────────────────────
+print("\n  8.7  Exporting model_coeffs_hourly.json …")
+
+if _cl_fit_ok:
+    _hourly_export = {
+        "note": (
+            f"Hourly odor-risk model — {_fit_method}. "
+            "Hour-of-day and calendar-month fixed effects remove diurnal reporting "
+            "behavior and the solar/hour-of-day collinearity, yielding genuine sub-daily "
+            "meteorological coefficients. At inference the 24 hourly z-values are "
+            "re-centered so their mean equals logit(daily_ORI/100), anchoring the "
+            "within-day shape to the calibrated daily ORI without changing its level."
+        ),
+        "coefficients": {k: float(v) for k, v in _cl_coeffs.items()},
+        "p_values": {k: float(v) for k, v in _cl_pvals.items()},
+        "confidence_intervals_95": {
+            k: [round(float(v[0]), 6), round(float(v[1]), 6)]
+            for k, v in _cl_cis.items()
+        },
+        "features_used": HOURLY_FEATS,
+        "features_omitted": {
+            "solar_radiation": "Absorbed by hour-of-day strata (near-collinear with hour-of-day)",
+            "diurnal_temperature_range": "Daily max-min by construction; zero variance within a single hour",
+        },
+        "metadata": {
+            "n_city_hours_total": int(_n_total_h),
+            "n_event_hours": int(_n_event_h),
+            "event_rate_pct": round(float(_ev_rate_h), 2),
+            "n_valid_strata": int(_df_cc["stratum"].nunique()),
+            "n_case_crossover_obs": int(len(_df_cc)),
+            "stratum_definition": "year × month × hour-of-day",
+            "anchoring": (
+                "At inference: shift all 24 hourly z-values by "
+                "(logit(daily_ORI/100) - mean(z_24h)) so the 24-hour mean "
+                "maps to the calibrated daily ORI."
+            ),
+            "training_period": (
+                f"{_df_ch['datetime'].min().date()} "
+                f"to {_df_ch['datetime'].max().date()}"
+            ),
+        },
+    }
+
+    _h_json_path = "Pittsburgh Data/model_coeffs_hourly.json"
+    with open(_h_json_path, "w") as _f:
+        json.dump(_hourly_export, _f, indent=2)
+    print(f"    Saved {_h_json_path}")
+    print(f"    n_city_hours={_n_total_h:,}  n_events={_n_event_h:,}  n_strata={_df_cc['stratum'].nunique():,}")
+else:
+    print("    Skipped (ConditionalLogit did not converge).")
+
+print("\n" + "=" * 70)
 print("ALL SECTIONS COMPLETE")
 print("=" * 70)

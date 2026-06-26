@@ -131,6 +131,24 @@ COEFFS_CALVERT_PROXIMITY = {
     'wind_align_weighted': COEFFS_PITTSBURGH_PROXIMITY['wind_align_weighted'],
 }
 
+# Hourly case-crossover model, produced by Dual_Model_Proximity_Analysis.py Section 8.
+# Features: temperature/temperature_squared/BLH/wind_speed/rh/pressure/precipitation.
+# No intercept — at inference the z-values are anchored to the calibrated daily ORI.
+HOURLY_MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                 "Pittsburgh Data", "model_coeffs_hourly.json")
+COEFFS_HOURLY = None
+HOURLY_MODEL_META = None
+if os.path.exists(HOURLY_MODEL_PATH):
+    try:
+        with open(HOURLY_MODEL_PATH) as _hh:
+            _hourly_json = json.load(_hh)
+        COEFFS_HOURLY = {k: float(v) for k, v in _hourly_json["coefficients"].items()}
+        HOURLY_MODEL_META = {k: v for k, v in _hourly_json.items() if k != "coefficients"}
+    except Exception:
+        COEFFS_HOURLY = None
+        HOURLY_MODEL_META = None
+
+
 # Optional locally-fitted Calvert City model, produced by analyze_calvert_reports.py
 # once enough real reports exist. The file is written ONLY when the user accepts an
 # install prompt; if present it is exposed in the dashboard as an extra mode. Its
@@ -430,49 +448,53 @@ def fetch_forecasts(locations):
 
 
 def _apply_daily_aggregates_to_hourly(df, bearing, loc_name):
-    """Hold daily-natured features constant per date so only BLH/temperature vary sub-daily.
+    """Compute raw-hourly wind alignment and add daily-aggregate companion columns.
 
-    Overwrites solar_radiation (daily mean), precipitation (daily sum),
-    relative_humidity / atmospheric_pressure / wind_speed (daily means), and
-    wind_direction (daily circular vector-mean), then recomputes wind_alignment
-    and aligned from that daily direction.  Temperature and BLH are left
-    untouched — they are the genuine sub-daily inversion drivers.
+    Raw hourly fields (solar_radiation, precipitation, relative_humidity,
+    atmospheric_pressure, wind_speed, wind_direction) are preserved as-is — the
+    fitted hourly model reads them directly.  A parallel set of *_daily columns
+    (solar_radiation_daily, precipitation_daily, relative_humidity_daily,
+    atmospheric_pressure_daily, wind_speed_daily, wind_direction_daily,
+    wind_alignment_daily, aligned_daily) holds the per-date aggregates needed by
+    the daily-constant-input (frankenstein) fallback view.  Temperature and BLH
+    are genuinely sub-daily and have no *_daily counterpart.
     """
     df = df.copy()
-    df['_wu'] = np.cos(np.radians(df['wind_direction']))
-    df['_wv'] = np.sin(np.radians(df['wind_direction']))
-    day_agg = df.groupby('date').agg(
-        solar_daily=('solar_radiation', 'mean'),
-        precip_daily=('precipitation', 'sum'),
-        rh_daily=('relative_humidity', 'mean'),
-        pres_daily=('atmospheric_pressure', 'mean'),
-        wspd_daily=('wind_speed', 'mean'),
-        wu_daily=('_wu', 'mean'),
-        wv_daily=('_wv', 'mean'),
-    ).reset_index()
-    day_agg['wdir_daily'] = (
-        np.degrees(np.arctan2(day_agg['wv_daily'], day_agg['wu_daily'])) % 360
-    )
-    df = df.merge(
-        day_agg[['date', 'solar_daily', 'precip_daily', 'rh_daily',
-                 'pres_daily', 'wspd_daily', 'wdir_daily']],
-        on='date',
-    )
-    df['solar_radiation']      = df['solar_daily']
-    df['precipitation']        = df['precip_daily']
-    df['relative_humidity']    = df['rh_daily']
-    df['atmospheric_pressure'] = df['pres_daily']
-    df['wind_speed']           = df['wspd_daily']
-    df['wind_direction']       = df['wdir_daily']
-    df.drop(columns=['solar_daily', 'precip_daily', 'rh_daily',
-                     'pres_daily', 'wspd_daily', 'wdir_daily', '_wu', '_wv'],
-            inplace=True)
+    # Raw hourly wind alignment (used by the fitted hourly model)
     df['wind_alignment'] = df['wind_direction'].apply(
         lambda wd: compute_continuous_wind_alignment(wd, bearing)
     )
     df['aligned'] = df['wind_direction'].apply(
         lambda wd: check_wind_alignment(wd, loc_name)
     )
+    # Build daily aggregates for the frankenstein fallback
+    df['_wu'] = np.cos(np.radians(df['wind_direction']))
+    df['_wv'] = np.sin(np.radians(df['wind_direction']))
+    day_agg = df.groupby('date').agg(
+        solar_radiation_daily=('solar_radiation', 'mean'),
+        precipitation_daily=('precipitation', 'sum'),
+        relative_humidity_daily=('relative_humidity', 'mean'),
+        atmospheric_pressure_daily=('atmospheric_pressure', 'mean'),
+        wind_speed_daily=('wind_speed', 'mean'),
+        _wu_d=('_wu', 'mean'),
+        _wv_d=('_wv', 'mean'),
+    ).reset_index()
+    day_agg['wind_direction_daily'] = (
+        np.degrees(np.arctan2(day_agg['_wv_d'], day_agg['_wu_d'])) % 360
+    )
+    df = df.merge(
+        day_agg[['date', 'solar_radiation_daily', 'precipitation_daily',
+                 'relative_humidity_daily', 'atmospheric_pressure_daily',
+                 'wind_speed_daily', 'wind_direction_daily']],
+        on='date',
+    )
+    df['wind_alignment_daily'] = df['wind_direction_daily'].apply(
+        lambda wd: compute_continuous_wind_alignment(wd, bearing)
+    )
+    df['aligned_daily'] = df['wind_direction_daily'].apply(
+        lambda wd: check_wind_alignment(wd, loc_name)
+    )
+    df.drop(columns=['_wu', '_wv'], inplace=True)
     return df
 
 
@@ -561,6 +583,10 @@ def fetch_hourly_forecasts(locations):
                 'relative_humidity', 'wind_speed', 'wind_direction', 'precipitation',
                 'dtr', 'boundary_layer_height', 'atmospheric_pressure',
                 'distance_from_source', 'bearing_from_source', 'wind_alignment', 'aligned',
+                # Daily-aggregate counterparts for the frankenstein fallback view
+                'solar_radiation_daily', 'precipitation_daily', 'relative_humidity_daily',
+                'atmospheric_pressure_daily', 'wind_speed_daily', 'wind_direction_daily',
+                'wind_alignment_daily', 'aligned_daily',
             ]])
 
         return pd.concat(all_rows, ignore_index=True), False
@@ -609,8 +635,6 @@ def fetch_hourly_forecasts(locations):
                     wind_dir   = (float(day_wdirs[day_i]) + float(rng.uniform(-20.0, 20.0))) % 360.0
                     rh_h       = float(day_rh[day_i]) + (4.0 if h < 9 or h > 20 else -2.0)
                     precip_h   = float(day_rain[day_i]) / 24.0
-                    wind_align = compute_continuous_wind_alignment(wind_dir, bearing)
-                    aligned    = check_wind_alignment(wind_dir, loc_name)
                     rows.append({
                         'datetime': f"{d_str}T{h:02d}:00",
                         'date': d_str, 'hour': h,
@@ -627,8 +651,6 @@ def fetch_hourly_forecasts(locations):
                         'atmospheric_pressure': float(day_press[day_i]),
                         'distance_from_source': distance,
                         'bearing_from_source': bearing,
-                        'wind_alignment': wind_align,
-                        'aligned': aligned,
                     })
             loc_df = pd.DataFrame(rows)
             loc_df = _apply_daily_aggregates_to_hourly(loc_df, bearing, loc_name)

@@ -84,6 +84,7 @@ def build_hourly_payload(hourly_df):
         for _, row in group.iterrows():
             loc_id = row['loc_id']
             per_tract[loc_id] = {
+                # Raw hourly values (for the fitted case-crossover model)
                 "aligned": bool(row['aligned']),
                 "wind_alignment": round(float(row['wind_alignment']), 3),
                 "distance": round(float(row['distance_from_source']), 2),
@@ -97,6 +98,15 @@ def build_hourly_payload(hourly_df):
                 "dtr": round(float(row['dtr']), 2),
                 "blh": round(float(row['boundary_layer_height']), 1),
                 "pressure": round(float(row['atmospheric_pressure']), 2),
+                # Daily-aggregate counterparts (for the daily-constant-input fallback view)
+                "aligned_d": bool(row['aligned_daily']),
+                "wind_alignment_d": round(float(row['wind_alignment_daily']), 3),
+                "solar_d": round(float(row['solar_radiation_daily']), 1),
+                "rh_d": round(float(row['relative_humidity_daily']), 1),
+                "wind_speed_d": round(float(row['wind_speed_daily']), 2),
+                "wind_dir_d": round(float(row['wind_direction_daily']), 1),
+                "precip_d": round(float(row['precipitation_daily']), 3),
+                "pressure_d": round(float(row['atmospheric_pressure_daily']), 2),
             }
         features[dt] = per_tract
 
@@ -162,6 +172,10 @@ def build_meta():
         "wind_defaults": {"filter": True, "penalty_pct": 75, "boost": 1.0, "continuous_mode": True},
         "distance_defaults": {"enabled": True, "rate": 0.02},
     }
+    # Hourly case-crossover model (separate from global dropdown — hourly-tab only)
+    meta["hourly_coeffs"] = core.COEFFS_HOURLY
+    meta["hourly_meta"] = core.HOURLY_MODEL_META
+
     metrics_path = os.path.join(ROOT, "model_metrics.json")
     if os.path.exists(metrics_path):
         with open(metrics_path) as f:

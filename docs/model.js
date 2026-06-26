@@ -54,7 +54,21 @@
     return { label: "High Risk", cls: "badge-high", rgb: [220, 38, 38] };
   }
 
-  var api = { computeZ: computeZ, computeOri: computeOri, getRiskTier: getRiskTier };
+  // Hourly case-crossover model: raw log-odds (no intercept, no sigmoid).
+  // Features: temp, temp_sq, blh, wind_speed, rh, pressure, precip.
+  // The caller must anchor these 24 values before applying sigmoid.
+  function hourlyZ(cell, hc, pressureOffset) {
+    if (!hc) return 0;
+    return (hc.temperature          || 0) * cell.temp
+         + (hc.temperature_squared  || 0) * cell.temp_sq
+         + (hc.boundary_layer_height|| 0) * cell.blh
+         + (hc.wind_speed           || 0) * cell.wind_speed
+         + (hc.relative_humidity    || 0) * cell.rh
+         + (hc.atmospheric_pressure || 0) * (cell.pressure - pressureOffset)
+         + (hc.precipitation        || 0) * cell.precip;
+  }
+
+  var api = { computeZ: computeZ, computeOri: computeOri, getRiskTier: getRiskTier, hourlyZ: hourlyZ };
   if (typeof module !== "undefined" && module.exports) { module.exports = api; }
   root.OdorModel = api;
 })(typeof window !== "undefined" ? window : globalThis);
