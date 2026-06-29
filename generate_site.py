@@ -5,10 +5,23 @@ a meta file with coefficients, so the browser can compute ORI live for any mode.
 """
 import os
 import json
+import math
 import shutil
 import datetime
 
+import pandas as pd
 import odor_forecast_core as core
+
+
+def _json_safe(o):
+    """Recursively replace NaN/Inf floats with None so json.dump never emits bare NaN."""
+    if isinstance(o, float):
+        return None if (math.isnan(o) or math.isinf(o)) else o
+    if isinstance(o, dict):
+        return {k: _json_safe(v) for k, v in o.items()}
+    if isinstance(o, list):
+        return [_json_safe(v) for v in o]
+    return o
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 
@@ -82,6 +95,8 @@ def build_hourly_payload(hourly_df):
     for dt, group in grouped:
         per_tract = {}
         for _, row in group.iterrows():
+            if pd.isna(row['temperature']):
+                continue  # missing forecast hour (tail of 16-day horizon) — omit the cell
             loc_id = row['loc_id']
             per_tract[loc_id] = {
                 # Raw hourly values (for the fitted case-crossover model)
@@ -198,13 +213,13 @@ def main(output_dir=None):
     hr_dates = sorted(hrdf["date"].unique())
 
     with open(os.path.join(output_dir, "forecast.json"), "w") as fh:
-        json.dump(build_feature_payload(fdf, f_dates), fh)
+        json.dump(_json_safe(build_feature_payload(fdf, f_dates)), fh)
     with open(os.path.join(output_dir, "historical.json"), "w") as fh:
-        json.dump(build_feature_payload(hdf, h_dates), fh)
+        json.dump(_json_safe(build_feature_payload(hdf, h_dates)), fh)
     with open(os.path.join(output_dir, "hourly.json"), "w") as fh:
-        json.dump(build_hourly_payload(hrdf), fh)
+        json.dump(_json_safe(build_hourly_payload(hrdf)), fh)
     with open(os.path.join(output_dir, "meta.json"), "w") as fh:
-        json.dump(build_meta(), fh, indent=2)
+        json.dump(_json_safe(build_meta()), fh, indent=2)
 
     # Copy tracts geojson (prefer tracts, fall back to zips)
     for geo_name in ["calvert_tracts.geojson", "calvert_zips.geojson"]:

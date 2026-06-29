@@ -544,5 +544,48 @@ new `test_build_meta_has_hourly_coeffs`; new `test_hourly_anchor_invariant`
 **15/15 tests passing** (`test_forecast_engine.py` + `test_generate_site.py` + `test_js_model.py`)
 
 ---
-*Last updated: 2026-06-25 by Claude Sonnet 4.6 — Fitted hourly case-crossover model, tab-local toggle, 15 tests passing*
+
+### Section 19 — Fix blank Hourly tab: NaN literals broke browser JSON.parse
+*2026-06-29 — Claude Sonnet 4.6*
+
+#### Root cause
+
+`docs/data/hourly.json` contained **1,280 bare `NaN` literals** (32 locations × 4 missing tail
+hours of the 16-day Open-Meteo horizon).  Python's `json.dump` writes `NaN`; Python's
+`json.load` accepts it (false-positive validation), but the browser's `JSON.parse` throws
+`SyntaxError`.  In `app.js`, `loadJSON("data/hourly.json")` sits inside `buildHourlyTab()`
+before any `panel.innerHTML` is set, and the tab-switch handler did not catch async errors —
+so the entire Hourly panel went blank.  The bug was introduced when the recent hourly-model
+refactor switched from daily-aggregate overwriting (NaN-free) to raw per-hour values
+(which exposed the missing tail hours).
+
+#### Fixes
+
+**`generate_site.py`**
+- Added `import pandas as pd`
+- Added `_json_safe(o)` recursive helper: converts `float NaN/Inf → None` before any
+  `json.dump`, so all four data files are always browser-strict.
+- `build_hourly_payload`: `if pd.isna(row['temperature']): continue` — fully-missing hours
+  are omitted from the payload rather than filled with null fields (avoids bogus chart points).
+- All four `json.dump(...)` calls in `main()` now wrapped: `json.dump(_json_safe(...), fh)`.
+
+**`docs/app.js`**
+- `buildHourlyTab` body wrapped in `try/catch`.  On failure, sets `#tab-hourly` to a
+  visible error message + **Retry** button (`onclick="buildHourlyTab()"`).  Converts any
+  future bad payload from a silent blank panel to a self-explanatory recoverable state.
+- Removed duplicate `var panel` declaration inside the try block.
+
+**`scratch/test_generate_site.py`**
+- New test `test_hourly_nan_cells_omitted_and_json_browser_safe`:
+  injects NaN into one hourly row, asserts the cell is omitted from the payload, and
+  asserts `json.dumps(_json_safe(payload), allow_nan=False)` does not raise — mirroring
+  browser `JSON.parse` strictness.  Also covers `build_feature_payload` and `build_meta`.
+
+#### Verification
+- `grep -c NaN docs/data/hourly.json` → **0** (after regeneration)
+- `node -e "JSON.parse(...hourly.json...)"` → **OK**
+- All tests: **16/16 passing** (new regression test added)
+
+---
+*Last updated: 2026-06-29 by Claude Sonnet 4.6 — NaN fix, 16 tests passing, deployed to both remotes*
 

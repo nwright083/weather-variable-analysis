@@ -1002,6 +1002,8 @@ function renderHourly() {
 }
 
 async function buildHourlyTab() {
+  var panel = document.getElementById("tab-hourly");
+  try {
   if (!APP.hourly) {
     APP.hourly = await loadJSON("data/hourly.json");
   }
@@ -1013,8 +1015,6 @@ async function buildHourlyTab() {
   var locs = APP.hourly.locations;
   _hourlyLocId = locs.length ? (locs[0].id || locs[0].zip) : null;
   _hourlyDate  = APP.hourly.dates[0];
-
-  var panel = document.getElementById("tab-hourly");
 
   var datesHtml = APP.hourly.dates.map(function(d, i) {
     var dt  = new Date(d + 'T00:00:00');
@@ -1137,6 +1137,16 @@ async function buildHourlyTab() {
   });
 
   renderHourly();
+  } catch (e) {
+    APP.hourly = null;
+    panel.innerHTML =
+      '<div style="padding:2rem;text-align:center;color:#b91c1c;">' +
+      '<p style="font-size:1rem;font-weight:600;">Couldn\'t load the hourly forecast.</p>' +
+      '<p style="font-size:0.85rem;color:#64748b;margin-bottom:1rem;">' + (e && e.message ? e.message : 'Unknown error') + '</p>' +
+      '<button onclick="buildHourlyTab()" style="padding:0.4rem 1.2rem;border-radius:0.4rem;' +
+      'background:#2563eb;color:#fff;border:none;cursor:pointer;font-size:0.9rem;">Retry</button>' +
+      '</div>';
+  }
 }
 
 // ── Map tab geolocation ───────────────────────────────────────────────────────

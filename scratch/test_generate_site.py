@@ -216,3 +216,45 @@ def test_hourly_anchor_invariant():
     assert abs(mean_ori - daily_ori) < 0.6, (
         f"Anchor invariant failed: mean(anchored ORI) = {mean_ori:.3f}%, expected ≈{daily_ori}%"
     )
+
+
+def test_hourly_nan_cells_omitted_and_json_browser_safe():
+    """Regression: missing forecast hours must not emit NaN literals (breaks browser JSON.parse)."""
+    import json as _json
+    import math
+    import numpy as np
+
+    dates = ["2026-06-24"]
+    df = _fake_hourly_df(dates)
+
+    # Inject a missing forecast row: all weather fields → NaN for hour 23 of first loc
+    first_loc = list(core.LOCATIONS.keys())[0]
+    parts = first_loc.split(" ", 2)
+    first_loc_id = parts[1] if len(parts) > 1 else first_loc
+    nan_fields = ['temperature', 'temperature_squared', 'solar_radiation', 'relative_humidity',
+                  'wind_speed', 'wind_direction', 'precipitation', 'dtr', 'boundary_layer_height',
+                  'atmospheric_pressure']
+    mask = (df['location'] == first_loc) & (df['hour'] == 23)
+    df.loc[mask, nan_fields] = np.nan
+
+    payload = generate_site.build_hourly_payload(df)
+
+    # The all-NaN cell must be omitted, not present with None values
+    dt_23 = f"2026-06-24T23:00"
+    assert dt_23 not in payload["features"] or first_loc_id not in payload["features"].get(dt_23, {}), \
+        "All-NaN hour cell should be omitted from payload"
+
+    # Strict serialization must not raise (mirrors browser JSON.parse)
+    safe = generate_site._json_safe(payload)
+    try:
+        _json.dumps(safe, allow_nan=False)
+    except ValueError as exc:
+        raise AssertionError(f"Browser-strict JSON serialization failed: {exc}")
+
+    # Same check for build_feature_payload and build_meta
+    daily_df = _fake_df(dates)
+    safe_forecast = generate_site._json_safe(generate_site.build_feature_payload(daily_df, dates))
+    _json.dumps(safe_forecast, allow_nan=False)
+
+    safe_meta = generate_site._json_safe(generate_site.build_meta())
+    _json.dumps(safe_meta, allow_nan=False)
