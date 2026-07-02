@@ -699,32 +699,22 @@ _ep_data = _curve_data(
     _y, _prob_ep,
     pseudo_r2_val=logit_weather_only.prsquared,
     cv_auc_val=cv_auc_a if cv_auc_a is not None else None,
-    note="Daily city-wide model evaluated on zip-day panel (same discrimination, different granularity)",
+    note="City-wide model (no spatial terms); thr_opt is from zip-day panel. "
+         "thr_opt_daily (0.3681) is hardcoded from the notebook's daily city-wide "
+         "analysis — the correct granularity for a model with no spatial terms.",
 )
-
-# For exact_pittsburgh, thr_opt above is misleading because the model has no spatial terms
-# (every zip gets the same ORI on a given day) but is evaluated against zip-level labels.
-# Recompute at the correct daily city-wide granularity: one row per date.
-_df_daily_ep = _df.copy()
-_df_daily_ep["_prob"] = _prob_ep.values
-_df_daily_ep["_y"]    = _y.values
-# Each date has one unique prob value; take the first, and take max label (any event = event day)
-_ep_daily = _df_daily_ep.groupby("date").agg(_prob=("_prob", "first"), _y=("_y", "max")).reset_index()
-try:
-    _prec_d, _rec_d, _thr_d = precision_recall_curve(_ep_daily["_y"], _ep_daily["_prob"])
-    _f1_d = 2 * _prec_d * _rec_d / (_prec_d + _rec_d + 1e-10)
-    _best_d = int(np.argmax(_f1_d))
-    _ep_data["thr_opt_daily"]  = round(float(_thr_d[_best_d]) if _best_d < len(_thr_d) else 0.5, 4)
-    _ep_data["f1_opt_daily"]   = round(float(_f1_d[_best_d]), 4)
-    _ep_data["thr_opt_daily_note"] = (
-        "F1-optimal threshold at daily city-wide granularity (one row per date). "
-        "Use this for alert decisions; the zip-day thr_opt is an artifact of evaluating a "
-        "spatially-flat model against spatially-varying labels."
-    )
-    print(f"  exact_pittsburgh daily-level thr_opt: {_ep_data['thr_opt_daily']:.4f} "
-          f"(F1={_ep_data['f1_opt_daily']:.4f})")
-except Exception as _e:
-    print(f"  Warning: could not compute daily-level thr_opt for exact_pittsburgh: {_e}")
+# The zip-day thr_opt for exact_pittsburgh is an artifact: the model gives every zip
+# the same ORI on a given day, but labels vary by zip, depressing the threshold.
+# The notebook evaluated this at the correct level (one row per date, city-wide WOB)
+# and found 0.3681. The analysis script's data pipeline uses a different label
+# aggregation that is incompatible, so we hardcode the notebook-derived value.
+_ep_data["thr_opt_daily"] = 0.3681
+_ep_data["f1_opt_daily"]  = 0.5041   # F1 at that threshold from notebook
+_ep_data["thr_opt_daily_note"] = (
+    "Hardcoded from notebook daily city-wide analysis (Odor_Complaint_Analysis_v2_debiased). "
+    "Use this for alert decisions; the zip-day thr_opt is an artifact of evaluating a "
+    "spatially-flat model against spatially-varying zip labels."
+)
 
 # Model B – pittsburgh_proximity
 _z_pp   = _linear_pred(_df, _core.COEFFS_PITTSBURGH_PROXIMITY)
@@ -733,6 +723,8 @@ _pp_data = _curve_data(
     _y, _prob_pp,
     pseudo_r2_val=logit_proximity_enhanced.prsquared,
     cv_auc_val=cv_auc_b if cv_auc_b is not None else None,
+    note="Proximity model; scores vary by tract so zip-day thr_opt (0.2038) is the "
+         "appropriate alert threshold — the app fires alerts per selected tract.",
 )
 
 # Model C – estimated_calvert (hand-tuned; evaluated on Pittsburgh panel)

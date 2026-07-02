@@ -623,9 +623,11 @@ function renderMethodsTab() {
     ? '<table class="metrics-table" style="margin-top:0.6rem;"><thead><tr>' +
       '<th>Model</th><th>Alert threshold (ORI)</th><th>F1 at threshold</th></tr></thead>' +
       '<tbody>' + thrRows + '</tbody></table>' +
-      '<p style="font-size:0.78rem;color:#64748b;margin-top:0.3rem;margin-bottom:0;">Thresholds are derived from the Precision-Recall curve on Pittsburgh training data — the ORI value that maximises F1-score. ' +
-      'The Exact Pittsburgh threshold (~36.8%) uses daily city-wide granularity (one row per day), which is the correct level for a model with no spatial terms. ' +
-      'The Pittsburgh Proximity threshold (~20%) uses the zip-day panel, appropriate since proximity scores vary by location. ' +
+      '<p style="font-size:0.78rem;color:#64748b;margin-top:0.3rem;margin-bottom:0;">' +
+      'The <b>Exact Pittsburgh threshold (36.8%)</b> was derived from the daily city-wide analysis in the Pittsburgh notebook — one row per date, city-level WOB binarized vs its mean. ' +
+      'This is the correct granularity because the model has no spatial terms (every tract gets the same ORI on a given day). ' +
+      'The raw zip-day F1-optimal threshold (6.97%) is an artifact of evaluating a spatially-flat model against spatially-varying zip labels and is not used for alerts. ' +
+      'The <b>Pittsburgh Proximity threshold (20.4%)</b> is from the zip-day panel, which is appropriate because proximity scores genuinely differ per tract and the alert fires per selected tract. ' +
       'These thresholds update automatically when a locally-fitted Calvert model is installed.</p>'
     : '';
   html +=

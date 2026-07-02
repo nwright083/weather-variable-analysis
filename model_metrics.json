@@ -415,9 +415,10 @@
       "thr_opt": 0.0697,
       "pseudo_r2": 0.3771,
       "cv_auc": 0.9028,
-      "note": "Daily city-wide model evaluated on zip-day panel (same discrimination, different granularity)",
+      "note": "City-wide model (no spatial terms); thr_opt is from zip-day panel. thr_opt_daily (0.3681) is hardcoded from the notebook's daily city-wide analysis \u2014 the correct granularity for a model with no spatial terms.",
       "thr_opt_daily": 0.3681,
-      "thr_opt_daily_note": "F1-optimal threshold computed at the correct daily city-wide granularity (one row per day). The zip-day thr_opt is artificially low because this model has no spatial terms yet is evaluated against spatially-varying zip labels."
+      "f1_opt_daily": 0.5041,
+      "thr_opt_daily_note": "Hardcoded from notebook daily city-wide analysis (Odor_Complaint_Analysis_v2_debiased). Use this for alert decisions; the zip-day thr_opt is an artifact of evaluating a spatially-flat model against spatially-varying zip labels."
     },
     "pittsburgh_proximity": {
       "fpr": [
@@ -832,7 +833,8 @@
       "f1_opt": 0.7341,
       "thr_opt": 0.2038,
       "pseudo_r2": 0.397,
-      "cv_auc": 0.9051
+      "cv_auc": 0.9051,
+      "note": "Proximity model; scores vary by tract so zip-day thr_opt (0.2038) is the appropriate alert threshold \u2014 the app fires alerts per selected tract."
     },
     "estimated_calvert": {
       "fpr": [
