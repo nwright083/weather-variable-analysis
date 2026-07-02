@@ -675,6 +675,114 @@ function renderMethodsTab() {
     'score reflects weather, not when people happen to file reports).</p>' +
     '</div>';
 
+  // ── Formula card ────────────────────────────────────────────────────────────
+  (function () {
+    var allModes = Object.keys(meta.coeffs || {}).filter(function(id) {
+      return ['exact_pittsburgh','pittsburgh_proximity','estimated_calvert'].indexOf(id) !== -1;
+    });
+    var modeLabels = {
+      exact_pittsburgh:     'Exact Pittsburgh',
+      pittsburgh_proximity: 'Proximity',
+      estimated_calvert:    'Est. Calvert',
+    };
+
+    function fmt(val) {
+      if (val == null) return '<span class="na">—</span>';
+      var abs = Math.abs(val);
+      var s;
+      if (abs === 0) s = '0';
+      else if (abs < 0.0001) s = val.toExponential(2);
+      else if (abs < 0.001)  s = val.toFixed(6);
+      else if (abs < 0.01)   s = val.toFixed(5);
+      else if (abs < 0.1)    s = val.toFixed(4);
+      else                   s = val.toFixed(4);
+      return '<span class="' + (val >= 0 ? 'coeff-pos' : 'coeff-neg') + '">' +
+             (val >= 0 ? '+' : '−') + (val < 0 ? s : s) + '</span>';
+    }
+    function getCoeff(mode, key) {
+      return (meta.coeffs[mode] || {})[key];
+    }
+
+    // Coefficient rows: [display name, symbol html, coeff key, is proximity-only]
+    var rows = [
+      ['Intercept (const)',           '&alpha;',                                    'const',                    false],
+      ['Temperature',                  '<span class="fv">T</span>',                 'temperature',              false],
+      ['Temperature²',                 '<span class="fv">T</span><sup>2</sup>',     'temperature_squared',      false],
+      ['Diurnal temp range',           '<span class="fv">DTR</span>',               'diurnal_temperature_range',false],
+      ['Boundary-layer height',        '<span class="fv">BLH</span>',               'boundary_layer_height',    false],
+      ['Solar radiation',              '<span class="fv">S</span>',                 'solar_radiation',          false],
+      ['Relative humidity',            '<span class="fv">RH</span>',                'relative_humidity',        false],
+      ['Wind speed',                   '<span class="fv">W</span>',                 'wind_speed',               false],
+      ['Precipitation',                '<span class="fv">P</span>',                 'precipitation',            false],
+      ['Atmospheric pressure',         '<span class="fv">p</span> − <span class="fv">p</span><sub>0</sub>', 'atmospheric_pressure', false],
+      ['Source exposure (proximity)',   '<span class="fv">e</span><sup>−0.02<span class="fv">d</span></sup>', 'multi_source_exposure', true],
+      ['Wind alignment (proximity)',    '<span class="fv">align</span>',             'wind_align_weighted',      true],
+    ];
+
+    var tHead = '<tr><th>Variable</th><th>Symbol</th>';
+    allModes.forEach(function(m) { tHead += '<th>' + modeLabels[m] + '</th>'; });
+    tHead += '</tr>';
+
+    var tBody = '';
+    rows.forEach(function(row) {
+      var name = row[0], sym = row[1], key = row[2], isProx = row[3];
+      var trCls = isProx ? ' class="prox-row"' : '';
+      tBody += '<tr' + trCls + '><td>' + name + (isProx ? ' <span style="font-size:0.72rem;color:#3b82f6;">★</span>' : '') + '</td>';
+      tBody += '<td class="sym">' + sym + '</td>';
+      allModes.forEach(function(m) {
+        var v = getCoeff(m, key);
+        tBody += '<td>' + (v != null ? fmt(v) : '<span class="na">—</span>') + '</td>';
+      });
+      tBody += '</tr>';
+    });
+
+    html +=
+      '<div class="method-card">' +
+      '<h2>The prediction formula</h2>' +
+      '<p style="margin-bottom:0.7rem;">ORI is a logistic regression computed in two steps. First, weather inputs are combined into a raw log-odds score <span class="fv"><i>z</i></span>. Second, the logistic function maps that score to a probability.</p>' +
+
+      '<div class="formula-block">' +
+      '<div class="formula-step-label">Step 1 &mdash; Linear predictor</div>' +
+      '<div class="formula-eq">' +
+        '<span class="fv">z</span>&nbsp;=&nbsp;&alpha;&nbsp;' +
+        '+&nbsp;&beta;<sub>T</sub>&thinsp;<span class="fv">T</span>&nbsp;' +
+        '+&nbsp;&beta;<sub>T²</sub>&thinsp;<span class="fv">T</span><sup>2</sup>&nbsp;' +
+        '+&nbsp;&beta;<sub>DTR</sub>&thinsp;<span class="fv">DTR</span>&nbsp;' +
+        '+&nbsp;&beta;<sub>BLH</sub>&thinsp;<span class="fv">BLH</span>&nbsp;' +
+        '+&nbsp;&beta;<sub>S</sub>&thinsp;<span class="fv">S</span>&nbsp;' +
+        '+&nbsp;&beta;<sub>RH</sub>&thinsp;<span class="fv">RH</span>&nbsp;' +
+        '+&nbsp;&beta;<sub>W</sub>&thinsp;<span class="fv">W</span>&nbsp;' +
+        '+&nbsp;&beta;<sub>P</sub>&thinsp;<span class="fv">P</span>&nbsp;' +
+        '+&nbsp;&beta;<sub>p</sub>&thinsp;(<span class="fv">p</span>&nbsp;&minus;&nbsp;<span class="fv">p</span><sub>0</sub>)' +
+      '</div>' +
+      '<div class="formula-prox">&#9733; Proximity-enhanced model adds: ' +
+        '&beta;<sub>exp</sub>&thinsp;&middot;&thinsp;<span class="fv">e</span><sup>&minus;0.02<span class="fv">d</span></sup>' +
+        '&nbsp;+&nbsp;&beta;<sub>align</sub>&thinsp;&middot;&thinsp;<span class="fv">align</span>' +
+        ' &ensp;<span style="font-weight:400;opacity:0.7;">where <span class="fv">d</span> = distance from source (mi), <span class="fv">align</span> = cosine wind-bearing score (0–1)</span>' +
+      '</div>' +
+      '</div>' +
+
+      '<div class="formula-block">' +
+      '<div class="formula-step-label">Step 2 &mdash; Odor Risk Index</div>' +
+      '<div class="formula-eq">' +
+        'ORI&nbsp;=&nbsp;&sigma;(<span class="fv">z</span>)&nbsp;&times;&nbsp;100%&nbsp;=&nbsp;' +
+        '<span class="frac"><span class="frac-n">100%</span><span class="frac-d">1&nbsp;+&nbsp;<span class="fv">e</span><sup>&minus;<span class="fv">z</span></sup></span></span>' +
+        '&ensp;<span style="font-size:0.82rem;color:#64748b;">clamped to [0%, 100%]</span>' +
+      '</div>' +
+      '</div>' +
+
+      '<p style="font-size:0.84rem;color:#475569;margin:0.8rem 0 0.4rem;"><b>Fitted coefficients (&beta;) by model</b> — positive values increase risk, negative values decrease it. ' +
+      '<span style="color:#3b82f6;">★</span> rows appear only in the proximity-enhanced model.</p>' +
+      '<div style="overflow-x:auto;">' +
+      '<table class="formula-coeff-table"><thead>' + tHead + '</thead><tbody>' + tBody + '</tbody></table>' +
+      '</div>' +
+      '<p style="font-size:0.76rem;color:#94a3b8;margin-top:0.4rem;margin-bottom:0;">' +
+        '<span class="fv">p</span><sub>0</sub> = ' + (meta.pressure_offset || 0).toFixed(2) + ' hPa (elevation offset correcting for the ~' +
+        Math.round((meta.pressure_offset || 0) / 0.12) + ' m altitude difference between Pittsburgh and Calvert City training sites).' +
+      '</p>' +
+      '</div>';
+  })();
+
   // Input variable table
   html +=
     '<div class="method-card">' +
