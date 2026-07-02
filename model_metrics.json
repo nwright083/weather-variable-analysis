@@ -415,7 +415,9 @@
       "thr_opt": 0.0697,
       "pseudo_r2": 0.3771,
       "cv_auc": 0.9028,
-      "note": "Daily city-wide model evaluated on zip-day panel (same discrimination, different granularity)"
+      "note": "Daily city-wide model evaluated on zip-day panel (same discrimination, different granularity)",
+      "thr_opt_daily": 0.3681,
+      "thr_opt_daily_note": "F1-optimal threshold computed at the correct daily city-wide granularity (one row per day). The zip-day thr_opt is artificially low because this model has no spatial terms yet is evaluated against spatially-varying zip labels."
     },
     "pittsburgh_proximity": {
       "fpr": [

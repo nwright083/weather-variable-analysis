@@ -43,9 +43,12 @@ const APP = {
   alertThreshold() {
     var mode = this.mode();
     var mm = this.meta && this.meta.model_metrics && this.meta.model_metrics.models;
-    var raw = mm && mm[mode] ? mm[mode].thr_opt : null;
+    var md = mm && mm[mode];
+    if (!md) return 30;
+    // Prefer the daily-level threshold when present (avoids the zip-day granularity artifact)
+    var raw = (md.thr_opt_daily != null) ? md.thr_opt_daily : md.thr_opt;
     if (raw != null && raw > 0.05 && raw < 1.0) return raw * 100;
-    return 30; // default to Elevated tier start
+    return 30; // fallback to Elevated tier start
   },
 };
 
@@ -604,19 +607,26 @@ function renderMethodsTab() {
     var mm = meta.model_metrics.models;
     Object.keys(meta.mode_labels || {}).forEach(function(id) {
       var m = mm[id];
-      if (!m || m.thr_opt == null) return;
-      var thr = m.thr_opt * 100;
+      if (!m) return;
+      // Prefer daily-level threshold (avoids zip-day granularity artifact)
+      var rawThr = (m.thr_opt_daily != null) ? m.thr_opt_daily : m.thr_opt;
+      var rawF1  = (m.f1_opt_daily  != null) ? m.f1_opt_daily  : m.f1_opt;
+      var thr = rawThr * 100;
       var label = (meta.mode_labels[id] || id);
-      var thrDisplay = (thr >= 100 || thr < 1) ? 'N/A (insufficient local data)' : thr.toFixed(1) + '%';
-      thrRows += '<tr><td>' + label + '</td><td style="font-weight:600;">' + thrDisplay + '</td><td>' +
-        (m.f1_opt != null ? m.f1_opt.toFixed(3) : '—') + '</td></tr>';
+      var thrDisplay = (!rawThr || thr >= 100 || thr < 1) ? 'N/A (insufficient local data)' : thr.toFixed(1) + '%';
+      var note = m.thr_opt_daily != null ? ' <span style="font-size:0.75rem;color:#64748b;">(daily)</span>' : '';
+      thrRows += '<tr><td>' + label + '</td><td style="font-weight:600;">' + thrDisplay + note + '</td><td>' +
+        (rawF1 != null ? rawF1.toFixed(3) : '—') + '</td></tr>';
     });
   }
   var thrTable = thrRows
     ? '<table class="metrics-table" style="margin-top:0.6rem;"><thead><tr>' +
       '<th>Model</th><th>Alert threshold (ORI)</th><th>F1 at threshold</th></tr></thead>' +
       '<tbody>' + thrRows + '</tbody></table>' +
-      '<p style="font-size:0.78rem;color:#64748b;margin-top:0.3rem;margin-bottom:0;">Derived from the Precision-Recall curve on Pittsburgh training data — the ORI value that maximises the F1-score (balance of false alarms vs. missed events). The Pittsburgh Proximity model threshold (~20%) is the most reliable because proximity-aware scores have a higher AUC (0.90) than the base models. These thresholds change when a locally-fitted Calvert model is installed.</p>'
+      '<p style="font-size:0.78rem;color:#64748b;margin-top:0.3rem;margin-bottom:0;">Thresholds are derived from the Precision-Recall curve on Pittsburgh training data — the ORI value that maximises F1-score. ' +
+      'The Exact Pittsburgh threshold (~36.8%) uses daily city-wide granularity (one row per day), which is the correct level for a model with no spatial terms. ' +
+      'The Pittsburgh Proximity threshold (~20%) uses the zip-day panel, appropriate since proximity scores vary by location. ' +
+      'These thresholds update automatically when a locally-fitted Calvert model is installed.</p>'
     : '';
   html +=
     '<div class="method-card">' +

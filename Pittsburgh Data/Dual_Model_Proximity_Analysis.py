@@ -692,7 +692,7 @@ def _curve_data(y_true, y_prob, pseudo_r2_val=None, cv_auc_val=None, note=None):
 _df = sub_full.copy()
 _y  = y_bin
 
-# Model A – pittsburgh_proximity (weather-only panel variant → maps to exact_pittsburgh)
+# Model A – exact_pittsburgh (weather-only, no spatial terms)
 _z_ep   = _linear_pred(_df, _core.COEFFS_PITTSBURGH)
 _prob_ep = 1.0 / (1.0 + np.exp(-_z_ep.clip(-60, 60)))
 _ep_data = _curve_data(
@@ -701,6 +701,30 @@ _ep_data = _curve_data(
     cv_auc_val=cv_auc_a if cv_auc_a is not None else None,
     note="Daily city-wide model evaluated on zip-day panel (same discrimination, different granularity)",
 )
+
+# For exact_pittsburgh, thr_opt above is misleading because the model has no spatial terms
+# (every zip gets the same ORI on a given day) but is evaluated against zip-level labels.
+# Recompute at the correct daily city-wide granularity: one row per date.
+_df_daily_ep = _df.copy()
+_df_daily_ep["_prob"] = _prob_ep.values
+_df_daily_ep["_y"]    = _y.values
+# Each date has one unique prob value; take the first, and take max label (any event = event day)
+_ep_daily = _df_daily_ep.groupby("date").agg(_prob=("_prob", "first"), _y=("_y", "max")).reset_index()
+try:
+    _prec_d, _rec_d, _thr_d = precision_recall_curve(_ep_daily["_y"], _ep_daily["_prob"])
+    _f1_d = 2 * _prec_d * _rec_d / (_prec_d + _rec_d + 1e-10)
+    _best_d = int(np.argmax(_f1_d))
+    _ep_data["thr_opt_daily"]  = round(float(_thr_d[_best_d]) if _best_d < len(_thr_d) else 0.5, 4)
+    _ep_data["f1_opt_daily"]   = round(float(_f1_d[_best_d]), 4)
+    _ep_data["thr_opt_daily_note"] = (
+        "F1-optimal threshold at daily city-wide granularity (one row per date). "
+        "Use this for alert decisions; the zip-day thr_opt is an artifact of evaluating a "
+        "spatially-flat model against spatially-varying labels."
+    )
+    print(f"  exact_pittsburgh daily-level thr_opt: {_ep_data['thr_opt_daily']:.4f} "
+          f"(F1={_ep_data['f1_opt_daily']:.4f})")
+except Exception as _e:
+    print(f"  Warning: could not compute daily-level thr_opt for exact_pittsburgh: {_e}")
 
 # Model B – pittsburgh_proximity
 _z_pp   = _linear_pred(_df, _core.COEFFS_PITTSBURGH_PROXIMITY)
