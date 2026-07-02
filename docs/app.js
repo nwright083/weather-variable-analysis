@@ -40,6 +40,13 @@ const APP = {
     };
   },
   oriFor(cell) { return OdorModel.computeOri(cell, this.activeCoeffs(), this.opts()); },
+  alertThreshold() {
+    var mode = this.mode();
+    var mm = this.meta && this.meta.model_metrics && this.meta.model_metrics.models;
+    var raw = mm && mm[mode] ? mm[mode].thr_opt : null;
+    if (raw != null && raw > 0.05 && raw < 1.0) return raw * 100;
+    return 30; // default to Elevated tier start
+  },
 };
 
 async function loadJSON(path) {
@@ -192,6 +199,7 @@ async function buildLocSelectMap(tabKey) {
       : "";
     var contentId = tabKey === "forecast" ? "forecast-grid" : "calendar";
     var contentCls = tabKey === "forecast" ? "card-grid" : "calendar-grid";
+    var alertDiv = tabKey === "forecast" ? '<div id="forecast-alert" class="forecast-alert"></div>' : "";
     panel.innerHTML =
       '<div class="loc-header">' +
       '  <button id="btn-locate-' + tabKey + '" class="btn-locate-small">📍 My Location</button>' +
@@ -199,6 +207,7 @@ async function buildLocSelectMap(tabKey) {
       '</div>' +
       '<div id="' + tabKey + '-loc-map" class="loc-select-map"></div>' +
       calHead +
+      alertDiv +
       '<div id="' + contentId + '" class="' + contentCls + '"></div>';
 
     if (tabKey === "monthly") {
@@ -292,6 +301,44 @@ async function buildLocSelectMap(tabKey) {
 
 // ── 16-Day forecast grid ──────────────────────────────────────────────────────
 
+function renderForecastAlert(loc) {
+  var banner = document.getElementById("forecast-alert");
+  if (!banner || !APP.forecast) return;
+  var thr = APP.alertThreshold();
+  var alertDays = [], highDays = [];
+  APP.forecast.dates.forEach(function (d) {
+    var cell = APP.forecast.features[d] && APP.forecast.features[d][loc];
+    if (!cell) return;
+    var ori = APP.oriFor(cell);
+    if (ori >= 50) highDays.push(d);
+    else if (ori >= thr) alertDays.push(d);
+  });
+  banner.className = "forecast-alert";
+  if (highDays.length) {
+    banner.classList.add("alert-high");
+    banner.innerHTML =
+      '<strong>🚨 High Odor Risk Forecast</strong>' +
+      highDays.length + ' day' + (highDays.length > 1 ? 's' : '') +
+      ' showing <b>High risk</b> conditions (ORI ≥ 50%) and ' +
+      (alertDays.length + highDays.length - highDays.length) + ' additional Elevated day' +
+      (alertDays.length !== 1 ? 's' : '') + ' in the 16-day window.' +
+      '<div class="alert-days">High risk days: ' +
+      highDays.map(function(d){ var dt=new Date(d+'T00:00:00'); return dt.toLocaleDateString(undefined,{month:'short',day:'numeric'}); }).join(', ') +
+      '</div>' +
+      '<div class="alert-days">Alert threshold: ORI ≥ ' + thr.toFixed(1) + '% (data-derived optimal for this model)</div>';
+  } else if (alertDays.length) {
+    banner.classList.add("alert-elevated");
+    banner.innerHTML =
+      '<strong>⚠️ Elevated Odor Risk Forecast</strong>' +
+      alertDays.length + ' day' + (alertDays.length > 1 ? 's' : '') +
+      ' in the next 16 days exceed the alert threshold (ORI ≥ ' + thr.toFixed(1) + '%). ' +
+      'Residents near industrial areas may notice elevated odors on these days.' +
+      '<div class="alert-days">' +
+      alertDays.map(function(d){ var dt=new Date(d+'T00:00:00'); return dt.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'}); }).join(' · ') +
+      '</div>';
+  }
+}
+
 function renderForecastGrid() {
   var lm = APP._locMaps && APP._locMaps.forecast;
   var loc = lm ? lm.getLocId() : (APP.forecast.locations[0] ? (APP.forecast.locations[0].id || APP.forecast.locations[0].zip) : null);
@@ -314,6 +361,7 @@ function renderForecastGrid() {
       '<span class="badge-pill ' + tier.cls + '">' + tier.label.split(" ")[0] + '</span>';
     grid.appendChild(card);
   });
+  renderForecastAlert(loc);
 }
 
 // ── Leaflet map (ORI overview tab) ────────────────────────────────────────────
@@ -551,20 +599,50 @@ function renderMethodsTab() {
   var html = '<div class="methods-wrap">';
 
   // Intro — what the number means
+  var thrRows = '';
+  if (meta.model_metrics && meta.model_metrics.models) {
+    var mm = meta.model_metrics.models;
+    Object.keys(meta.mode_labels || {}).forEach(function(id) {
+      var m = mm[id];
+      if (!m || m.thr_opt == null) return;
+      var thr = m.thr_opt * 100;
+      var label = (meta.mode_labels[id] || id);
+      var thrDisplay = (thr >= 100 || thr < 1) ? 'N/A (insufficient local data)' : thr.toFixed(1) + '%';
+      thrRows += '<tr><td>' + label + '</td><td style="font-weight:600;">' + thrDisplay + '</td><td>' +
+        (m.f1_opt != null ? m.f1_opt.toFixed(3) : '—') + '</td></tr>';
+    });
+  }
+  var thrTable = thrRows
+    ? '<table class="metrics-table" style="margin-top:0.6rem;"><thead><tr>' +
+      '<th>Model</th><th>Alert threshold (ORI)</th><th>F1 at threshold</th></tr></thead>' +
+      '<tbody>' + thrRows + '</tbody></table>' +
+      '<p style="font-size:0.78rem;color:#64748b;margin-top:0.3rem;margin-bottom:0;">Derived from the Precision-Recall curve on Pittsburgh training data — the ORI value that maximises the F1-score (balance of false alarms vs. missed events). The Pittsburgh Proximity model threshold (~20%) is the most reliable because proximity-aware scores have a higher AUC (0.90) than the base models. These thresholds change when a locally-fitted Calvert model is installed.</p>'
+    : '';
   html +=
     '<div class="method-card">' +
     '<h2>How these forecasts work</h2>' +
     '<p>Every forecast is an <b>Odor Risk Index (ORI)</b> — the estimated probability (0–100%) of a ' +
-    'community-wide <b>odor-trapping</b> event on that day. It is computed from weather using logistic ' +
-    'regression: the model combines the day\'s conditions into a score, then converts it to a probability.</p>' +
+    'community-wide odor event on that day. Two distinct factors drive the score:</p>' +
+    '<ul>' +
+    '<li><b>Atmospheric trapping conditions</b> — temperature inversions, boundary-layer height, wind speed, ' +
+    'humidity, and related variables that determine whether odors stay concentrated near the ground.</li>' +
+    '<li><b>Wind direction and proximity to odor sources</b> — in the Pittsburgh Proximity-Enhanced model, ' +
+    'risk is further weighted by how directly the wind blows toward each census tract from industrial emitters, ' +
+    'and by how far that tract is from those sources. Pittsburgh data showed a high correlation between ' +
+    'upwind distance to industrial sites and the volume of community odor reports.</li>' +
+    '</ul>' +
     '<p style="margin-bottom:0;">It predicts when the <b>atmosphere will trap and concentrate</b> odor near the ground — ' +
-    'not whether the source is emitting. Risk tiers:</p>' +
+    'not whether the source is actively emitting. Risk tiers:</p>' +
     '<div class="tier-row">' +
     '<span class="badge-pill badge-clear">Clear / Low &lt; 15%</span>' +
     '<span class="badge-pill badge-moderate">Moderate 15–30%</span>' +
     '<span class="badge-pill badge-elevated">Elevated 30–50%</span>' +
     '<span class="badge-pill badge-high">High ≥ 50%</span>' +
-    '</div></div>';
+    '</div>' +
+    (thrTable
+      ? '<div style="margin-top:0.8rem;"><b style="font-size:0.9rem;">Data-derived alert thresholds (per model)</b>' + thrTable + '</div>'
+      : '') +
+    '</div>';
 
   // Shared physics
   html +=

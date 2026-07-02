@@ -587,5 +587,49 @@ refactor switched from daily-aggregate overwriting (NaN-free) to raw per-hour va
 - All tests: **16/16 passing** (new regression test added)
 
 ---
-*Last updated: 2026-06-29 by Claude Sonnet 4.6 — NaN fix, 16 tests passing, deployed to both remotes*
+
+### Section 20 — Methodology update, 30-Day Historical rename, per-model alert thresholds
+*2026-06-29 — Claude Sonnet 4.6*
+
+#### Changes
+
+**`docs/index.html`**
+- Tab label changed from `📅 30-Day` → `📅 30-Day Historical`.
+
+**`docs/app.js`**
+- `APP.alertThreshold()`: reads `meta.model_metrics.models[mode].thr_opt * 100` for the active
+  model; falls back to 30 when thr_opt is absent, < 5%, or ≥ 100%.
+- `renderForecastAlert(loc)`: new function; computes alert/high-risk days for the selected
+  tract; updates `#forecast-alert` banner (orange "Elevated" or red "High") showing affected
+  dates and the data-derived threshold that fired. Hidden when no days exceed threshold.
+- `buildLocSelectMap` (forecast tab): injects `<div id="forecast-alert">` between the
+  mini-map and the card grid.
+- `renderForecastGrid`: calls `renderForecastAlert` after populating cards, so the banner
+  updates whenever the tract selection, date, or model mode changes.
+- **Methodology intro rewritten** to reflect that ORI captures two distinct factors:
+  1. Atmospheric trapping (inversions, BLH, wind speed, DTR, etc.)
+  2. Wind direction alignment + distance from industrial emitters (Pittsburgh Proximity model) —
+     Pittsburgh data showed high correlation between upwind proximity to sources and report volume.
+- **Alert thresholds table** added to the methodology intro card: shows the F1-optimal alert
+  threshold and F1 score for each model, derived from the Precision-Recall curve on Pittsburgh
+  training data and sourced from `meta.model_metrics`. Notes that Proximity model (~20%) is most
+  reliable (AUC 0.90); base models have lower AUC and edge-case thresholds.
+
+**`docs/style.css`**
+- `.forecast-alert`, `.forecast-alert.alert-elevated`, `.forecast-alert.alert-high`,
+  `.forecast-alert strong`, `.forecast-alert .alert-days`: new banner styles (hidden by default,
+  shown via JS class toggling).
+
+#### Alert threshold values (current)
+| Model | thr_opt | F1 |
+|---|---|---|
+| Pittsburgh Proximity | 20.4% | 0.734 |
+| Exact Pittsburgh | 6.97% | 0.504 |
+| Estimated Calvert | ~100% (N/A) | 0.475 |
+
+The proximity model threshold is the most meaningful; the base models fire more/less due to
+different ORI score distributions. A locally-fitted Calvert model will install its own thr_opt.
+
+---
+*Last updated: 2026-06-29 by Claude Sonnet 4.6 — methodology rewrite, alert banner, 30-Day Historical rename*
 
