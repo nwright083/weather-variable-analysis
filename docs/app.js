@@ -379,11 +379,6 @@ function mapPanelScaffold() {
     '<button id="btn-locate-map" class="btn-locate">📍 Use My Location</button>' +
     '<div class="map-toolbar">' +
     '  <label>Date <select id="map-date"></select></label>' +
-    '  <fieldset class="layers"><legend>Layers</legend>' +
-    '    <label><input type="checkbox" id="layer-risk" checked> Risk</label>' +
-    '    <label title="Coming soon"><input type="checkbox" id="layer-plume" disabled> Plume</label>' +
-    '    <label title="Coming soon"><input type="checkbox" id="layer-reports" disabled> Reports</label>' +
-    '  </fieldset>' +
     '</div><div id="map"></div>';
   var sel = panel.querySelector("#map-date");
   APP.forecast.dates.forEach(function (d, i) {

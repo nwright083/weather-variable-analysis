@@ -11,6 +11,7 @@ __pycache__/
 .DS_Store
 
 scratch/
+.admin_config.json
 
 # Generated forecast data (produced by generate_site.py / CI)
 docs/data/
