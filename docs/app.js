@@ -502,10 +502,11 @@ function renderReportTab() {
   panel.innerHTML =
     '<div class="clean-card" style="text-align:left;max-width:560px;">' +
     '<h3 style="margin:0 0 0.5rem;">Report an Odor</h3>' +
-    '<p style="font-size:0.85rem;margin:0 0 0.8rem;color:#475569;">Choose an option — your location will be captured and the report form will open automatically with it pre-filled.</p>' +
     '<div style="display:flex;flex-direction:column;gap:0.6rem;">' +
-    '  <button id="btn-geo" class="report-btn">📍 Use My Exact Location</button>' +
-    '  <button id="btn-geo-skew" class="report-btn">🛡️ Use Approximate Location (Privacy)</button>' +
+    '  <a href="https://smellmycity.org/" target="_blank" rel="noopener" class="report-btn report-btn-link">📱 Download Smell My City</a>' +
+    '  <div style="font-size:0.75rem;color:#94a3b8;text-align:center;letter-spacing:0.02em;">— or submit via Google Form —</div>' +
+    '  <button id="btn-geo" class="report-btn">📍 Use My Exact Location (Google Form)</button>' +
+    '  <button id="btn-geo-skew" class="report-btn">🛡️ Use Approximate Location (Google Form)</button>' +
     '</div>' +
     '<div id="geo-status" style="font-size:0.78rem;color:#64748b;margin-top:0.7rem;min-height:1.2em;"></div>' +
     '</div>';
@@ -516,7 +517,11 @@ function renderReportTab() {
     statusEl.textContent = "Getting your location…";
     navigator.geolocation.getCurrentPosition(function (pos) {
       var lat = pos.coords.latitude, lon = pos.coords.longitude;
-      if (skew) { lat += (Math.random() * 0.004) - 0.002; lon += (Math.random() * 0.004) - 0.002; }
+      if (skew) {
+        // ±100–500 ft per axis (0.0003–0.0014 deg ≈ 110–510 ft at this latitude)
+        lat += (Math.random() < 0.5 ? 1 : -1) * (0.0003 + Math.random() * 0.0011);
+        lon += (Math.random() < 0.5 ? 1 : -1) * (0.0003 + Math.random() * 0.0011);
+      }
       statusEl.textContent = (skew ? "Approximate" : "Exact") + " location captured — opening form…";
       window.open(buildFormUrl(lat, lon), "_blank", "noopener");
     }, function (err) {
