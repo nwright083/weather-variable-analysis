@@ -386,7 +386,6 @@ function mapPanelScaffold() {
     sel.appendChild(o);
   });
   sel.addEventListener("change", renderMap);
-  panel.querySelector("#layer-risk").addEventListener("change", renderMap);
   APP._mapState.dateSel = sel;
 }
 
@@ -407,9 +406,7 @@ function renderMap() {
   if (!APP._mapState.map) return;
   var ms = APP._mapState;
   var date = ms.dateSel.value;
-  var showRisk = document.getElementById("layer-risk").checked;
   if (ms.geo) { ms.map.removeLayer(ms.geo); ms.geo = null; }
-  if (!showRisk) return;
   var feats = APP.forecast.features[date] || {};
   ms.geo = L.geoJSON(ms.geojson, {
     style: function (f) {
@@ -503,7 +500,7 @@ function renderReportTab() {
     '<div class="clean-card" style="text-align:left;max-width:560px;">' +
     '<h3 style="margin:0 0 0.5rem;">Report an Odor</h3>' +
     '<div style="display:flex;flex-direction:column;gap:0.6rem;">' +
-    '  <a href="https://smellmycity.org/" target="_blank" rel="noopener" class="report-btn report-btn-link">📱 Download Smell My City</a>' +
+    '  <a href="https://smellmycity.org/" target="_blank" rel="noopener" class="report-btn report-btn-link">📱 Download Smell My City (Recommended)</a>' +
     '  <div style="font-size:0.75rem;color:#94a3b8;text-align:center;letter-spacing:0.02em;">— or submit via Google Form —</div>' +
     '  <button id="btn-geo" class="report-btn">📍 Use My Exact Location (Google Form)</button>' +
     '  <button id="btn-geo-skew" class="report-btn">🛡️ Use Approximate Location (Google Form)</button>' +
