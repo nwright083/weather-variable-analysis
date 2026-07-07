@@ -1,7 +1,25 @@
-"""Headless generator for the static odor-risk forecast site.
+"""
+generate_site.py — Daily data pipeline for the Calvert City Odor Risk Forecaster.
 
-Fetches weather via odor_forecast_core, emits RAW model features (not ORI) plus
-a meta file with coefficients, so the browser can compute ORI live for any mode.
+Run automatically every day at 06:00 UTC by GitHub Actions (.github/workflows/forecast.yml).
+Can also be run locally for testing: python generate_site.py
+
+What it does:
+  1. Fetches 16-day forecast, 30-day historical, and hourly weather from Open-Meteo API
+     for all 32 Census Tract locations around Calvert City.
+  2. Writes four JSON files into docs/data/ (served as static assets by GitHub Pages):
+       forecast.json   — 16-day daily forecast features per tract
+       historical.json — 30-day historical features per tract
+       hourly.json     — per-hour features for the Hourly tab
+       meta.json       — model coefficients, mode labels, metrics, UI config
+  3. Copies calvert_tracts.geojson → docs/calvert_areas.geojson (map boundaries).
+
+Design: the JSON files contain raw weather features, NOT pre-computed ORI scores.
+The browser (docs/model.js) computes ORI live so any model mode switch is instant
+without a server round-trip.
+
+If Open-Meteo returns no live data, the script raises an error and exits non-zero
+so GitHub Actions keeps the last good deploy rather than overwriting it with zeros.
 """
 import os
 import json
@@ -27,6 +45,7 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 
 
 def _location_directory():
+    """Build the list of location objects included in every JSON payload."""
     locs = []
     for name, info in core.LOCATIONS.items():
         lat, lon = info["coords"]
@@ -44,6 +63,7 @@ def _location_directory():
 
 
 def build_feature_payload(df, dates_sorted):
+    """Convert a daily weather DataFrame into the nested features dict used by forecast.json and historical.json."""
     features = {}
     for d in dates_sorted:
         day = df[df["date"] == d]
@@ -134,6 +154,7 @@ def build_hourly_payload(hourly_df):
 
 
 def build_meta():
+    """Build meta.json: coefficients for all active models, UI config, and model performance metrics."""
     custom_ranges = {
         "const": [-30.0, 30.0, 0.1],
         "temperature": [-0.5, 0.5, 0.001],
@@ -199,6 +220,7 @@ def build_meta():
 
 
 def main(output_dir=None):
+    """Fetch live weather, build all JSON payloads, and write them to docs/data/."""
     output_dir = output_dir or os.path.join(ROOT, "docs", "data")
     os.makedirs(output_dir, exist_ok=True)
 

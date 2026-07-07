@@ -56,9 +56,7 @@ body { font-family: -apple-system, system-ui, sans-serif; margin: 0; color: #0f1
 #map { height:520px; border-radius:8px; }
 .map-toolbar { display:flex; gap:1.5rem; align-items:center; margin-bottom:0.6rem; flex-wrap:wrap; }
 .map-toolbar label { font-size:0.82rem; }
-.map-toolbar .layers { display:flex; gap:0.8rem; border:1px solid #e2e8f0; border-radius:6px; padding:0.25rem 0.6rem; }
-.map-toolbar .layers legend { font-size:0.7rem; opacity:0.6; padding:0; }
-.map-toolbar .layers label { margin:0; display:flex; align-items:center; gap:0.3rem; }
+
 
 /* Report tab */
 button { padding:0.4rem 0.7rem; border:1px solid #cbd5e1; border-radius:6px; background:#fff; cursor:pointer; font-size:0.82rem; }

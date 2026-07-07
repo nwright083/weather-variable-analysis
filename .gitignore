@@ -12,6 +12,8 @@ __pycache__/
 
 scratch/
 .admin_config.json
+calvert_tester_logs.db
+CALVERT_FORECASTER_REVIEW.md
 
 # Generated forecast data (produced by generate_site.py / CI)
 docs/data/

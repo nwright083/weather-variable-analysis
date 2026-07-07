@@ -1,8 +1,25 @@
-"""Pure odor-risk forecasting logic — no Streamlit, no import-time side effects.
+"""
+odor_forecast_core.py — Core ORI model logic for the Calvert City Odor Risk Forecaster.
 
-Shared by the Streamlit app (calvert_odor_forecaster.py) and the static-site
-generator (generate_site.py). This module is the single source of truth for the
-model coefficients and the PRESSURE_ELEVATION_OFFSET.
+This module is the single source of truth for:
+  - Model coefficients (Pittsburgh-trained + optional Calvert-fitted)
+  - ORI (Odor Risk Index) computation: logistic regression → 0–100% probability
+  - Wind alignment and distance-decay calculations
+  - Open-Meteo API fetches (forecast, historical, hourly)
+
+Imported by:
+  - generate_site.py  (CI pipeline, runs daily via GitHub Actions)
+  - analyze_calvert_reports.py  (local tool to retrain from Calvert data)
+  - scratch/test_*.py  (unit tests)
+
+The three production models:
+  COEFFS_PITTSBURGH          — Pittsburgh model, no spatial terms (baseline)
+  COEFFS_PITTSBURGH_PROXIMITY — Pittsburgh model + wind direction + distance decay
+  COEFFS_EST_CALVERT         — Manually estimated Calvert-specific coefficients
+  COEFFS_CALVERT_FITTED      — Auto-fitted from local Calvert reports (if enough data)
+
+To update coefficients: run Pittsburgh Data/Dual_Model_Proximity_Analysis.py from
+the repo root, review its output, then manually paste the new values below.
 """
 import os
 import json
@@ -61,10 +78,6 @@ LOCATIONS = {
     "TRACT 21157950603 (Tract Census Tract 9506.03, Marshall Co.)": {"coords": (36.8306, -88.1830)},
 }
 
-
-def _tract_id_from_location(location_name):
-    """Extract GEOID from 'TRACT 21157XXXXXX (Name)' format."""
-    return location_name.split(" ")[1]
 
 COEFFS_PITTSBURGH = {
     'const': 3.559257,
