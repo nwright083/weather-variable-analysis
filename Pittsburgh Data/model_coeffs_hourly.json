@@ -1,5 +1,5 @@
 {
-  "note": "Hourly conditional logistic regression (time-stratified case-crossover). Strata = (year, month, hour-of-day): within each stratum, report-hours (cases) are compared to non-report control-hours at the same hour of the same calendar month. This differences out diurnal reporting behavior AND the solar/hour-of-day collinearity. No intercept (conditional logit). At inference, the 24 hourly z-values are re-centered so their mean equals logit(daily_ORI/100), anchoring the within-day shape to the calibrated daily ORI without changing its level.",
+  "note": "Hourly odor-risk model \u2014 Logit + hour-of-day & month fixed-effect dummies (fallback). Hour-of-day and calendar-month fixed effects remove diurnal reporting behavior and the solar/hour-of-day collinearity, yielding genuine sub-daily meteorological coefficients. At inference the 24 hourly z-values are re-centered so their mean equals logit(daily_ORI/100), anchoring the within-day shape to the calibrated daily ORI without changing its level.",
   "coefficients": {
     "temperature": 0.08454329366149198,
     "temperature_squared": -0.000379434959661653,
