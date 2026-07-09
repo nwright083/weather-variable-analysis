@@ -148,7 +148,7 @@ COEFFS_CALVERT_PROXIMITY = {
 # Features: temperature/temperature_squared/BLH/wind_speed/rh/pressure/precipitation.
 # No intercept — at inference the z-values are anchored to the calibrated daily ORI.
 HOURLY_MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                 "Pittsburgh Data", "model_coeffs_hourly.json")
+                                 "model_coeffs_hourly.json")
 COEFFS_HOURLY = None
 HOURLY_MODEL_META = None
 if os.path.exists(HOURLY_MODEL_PATH):

@@ -37,19 +37,25 @@ The browser loads those JSON files and computes the **ORI (Odor Risk Index)** li
 ├── generate_site.py                 CI entry point — fetches weather, builds JSON payloads
 ├── odor_forecast_core.py            Model coefficients + ORI math + Open-Meteo API calls
 ├── model_metrics.json               F1-optimal thresholds and performance stats per model
+├── model_coeffs_hourly.json         Hourly case-crossover model coefficients
 │
 ├── calvert_tracts.geojson           Census tract boundaries (32 tracts, used for map)
 ├── calvert_zips.geojson             ZIP code boundaries (fallback if tracts unavailable)
 │
 ├── analyze_calvert_reports.py       Tool: fit a Calvert-specific model from local odor reports
 │
-├── scratch/                         Unit tests — run with: python -m pytest scratch/ -q
-│   ├── test_forecast_engine.py      Tests ORI math, wind alignment, distance decay
-│   ├── test_generate_site.py        Tests JSON payload building + NaN safety
-│   └── test_js_model.py             Tests browser model.js matches Python via Node
+├── ad_config.py                     Ad trigger configuration (thresholds, timing, provider)
+├── ad_trigger.py                    ORI-triggered ad campaign decision engine
+├── ad_providers/                    Pluggable ad provider adapters
+│   ├── base.py                      Abstract provider interface
+│   ├── mock.py                      Mock provider (logging only, for testing)
+│   └── eltoro.py                    El Toro GeoFraming placeholder (pending API access)
 │
-├── Pittsburgh Data/                 Research archive — Pittsburgh analysis that produced the model coefficients
-└── Louisville Data/                 Research archive — comparative Louisville analysis
+└── scratch/                         Unit tests — run with: python -m pytest scratch/ -q
+    ├── test_forecast_engine.py      Tests ORI math, wind alignment, distance decay
+    ├── test_generate_site.py        Tests JSON payload building + NaN safety
+    ├── test_js_model.py             Tests browser model.js matches Python via Node
+    └── test_ad_trigger.py           Tests ad trigger framework
 ```
 
 ---
@@ -130,9 +136,9 @@ Reports can come from:
 
 ## Research archive
 
-`Pittsburgh Data/` and `Louisville Data/` contain the analysis notebooks and scripts used to develop and validate the logistic regression models. These are not part of the live forecaster — they are preserved as reference material showing the scientific methodology behind the coefficients.
+The Pittsburgh and Louisville analysis notebooks and scripts used to develop and validate the logistic regression models are preserved in the private Gitea mirror (not included in this public GitHub repo). They are reference material showing the scientific methodology behind the deployed coefficients.
 
-Key file: `Pittsburgh Data/Dual_Model_Proximity_Analysis.py` — this is the script that produced the deployed coefficients. Run it from the repo root if you ever need to retrain from updated Pittsburgh data.
+Key file: `Pittsburgh Data/Dual_Model_Proximity_Analysis.py` (in Gitea) — this is the script that produced the deployed coefficients.
 
 ---
 

@@ -15,6 +15,11 @@ scratch/
 calvert_tester_logs.db
 CALVERT_FORECASTER_REVIEW.md
 
+# Research archive — kept in Gitea only (private), not in GitHub (public)
+Pittsburgh Data/
+Louisville Data/
+Odor_Complaint_Analysis_Walkthrough.md
+
 # Generated forecast data (produced by generate_site.py / CI)
 docs/data/
 
