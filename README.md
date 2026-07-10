@@ -141,10 +141,3 @@ The Pittsburgh and Louisville analysis notebooks and scripts used to develop and
 Key file: `Pittsburgh Data/Dual_Model_Proximity_Analysis.py` (in Gitea) — this is the script that produced the deployed coefficients.
 
 ---
-
-## Contacts / handoff notes
-
-- Original developer: Nick Wright (wrightnicholas4@gmail.com)
-- Project: SRSP / University odor monitoring initiative, Calvert City KY
-- GitHub repo: https://github.com/nwright083/weather-variable-analysis
-- Gitea (home server mirror): http://100.81.48.124:3005/nick/weather-variable-analysis
