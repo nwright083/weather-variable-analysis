@@ -175,16 +175,14 @@ def build_meta():
         "decay_rate": [0.0, 0.5, 0.01],
     }
     coeffs = {
-        "estimated_calvert": core.COEFFS_EST_CALVERT,
         "exact_pittsburgh": core.COEFFS_PITTSBURGH,
         "pittsburgh_proximity": core.COEFFS_PITTSBURGH_PROXIMITY,
     }
     mode_labels = {
-        "estimated_calvert": "Estimated Calvert City",
         "exact_pittsburgh": "Exact Pittsburgh Model",
         "pittsburgh_proximity": "Pittsburgh Proximity-Enhanced",
     }
-    default_mode = "pittsburgh_proximity"
+    default_mode = "exact_pittsburgh"
 
     # Expose a locally-fitted Calvert model if analyze_calvert_reports.py installed one.
     if core.COEFFS_CALVERT_FITTED:

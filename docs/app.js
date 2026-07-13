@@ -89,7 +89,7 @@ function buildModeSelect() {
   });
   var custom = document.createElement("option"); custom.value = "custom"; custom.textContent = "Custom (manual)";
   sel.appendChild(custom);
-  sel.value = APP.meta.default_mode || "pittsburgh_proximity";
+  sel.value = APP.meta.default_mode || "exact_pittsburgh";
 }
 
 function buildCustomCoeffSliders() {
@@ -550,27 +550,12 @@ var MODE_DOCS = {
     ],
     best: "Best all-around choice: the only model with true spatial + wind-direction awareness.",
   },
-  estimated_calvert: {
-    tagline: "Pittsburgh science, hand-tuned for Calvert's flat rural terrain.",
-    data: "Pittsburgh city-wide daily model, with coefficients manually adjusted using engineering judgment (not fitted to Calvert data).",
-    how: "Starts from the city-wide Pittsburgh daily model, then strengthens the <b>wind-speed</b> and " +
-      "<b>boundary-layer-height</b> sensitivities (open rural terrain disperses and mixes differently than a city " +
-      "valley) and raises the baseline. It has <b>no</b> proximity or wind-direction terms, so every tract gets the " +
-      "same score on a given day.",
-    notes: [
-      "Most temperature- and stagnation-sensitive of the models — it reacts strongly to warm, calm summer days with strong overnight inversions.",
-      "It carries the strongest boundary-layer-height sensitivity of any model (deliberately boosted for rural mixing).",
-      "Calibrated by judgment, not fit to local data — treat as an informed estimate.",
-    ],
-    best: "Use to see a Calvert-terrain-adjusted view, or to compare against the proximity model.",
-  },
   exact_pittsburgh: {
     tagline: "The unmodified Pittsburgh model — a reference baseline.",
     data: "Pittsburgh city-wide daily logistic regression, used exactly as trained.",
     how: "The raw Pittsburgh science applied to Calvert weather with no terrain adjustment and no proximity terms. " +
       "Only the elevation pressure-offset correction is applied.",
     notes: [
-      "Same temperature/DTR sensitivity as Estimated Calvert, but without the rural wind/mixing boosts.",
       "Useful as a 'what does the original model say, untouched?' reference.",
     ],
     best: "Reference/comparison baseline.",
@@ -675,12 +660,11 @@ function renderMethodsTab() {
   // ── Formula card ────────────────────────────────────────────────────────────
   (function () {
     var allModes = Object.keys(meta.coeffs || {}).filter(function(id) {
-      return ['exact_pittsburgh','pittsburgh_proximity','estimated_calvert'].indexOf(id) !== -1;
+      return ['exact_pittsburgh','pittsburgh_proximity'].indexOf(id) !== -1;
     });
     var modeLabels = {
       exact_pittsburgh:     'Exact Pittsburgh',
       pittsburgh_proximity: 'Proximity',
-      estimated_calvert:    'Est. Calvert',
     };
 
     function fmt(val) {
@@ -840,8 +824,8 @@ function renderMethodsTab() {
     var _VP = {L:44, R:14, T:18, B:44, W:330, H:210};
     var _vpw = _VP.W - _VP.L - _VP.R;
     var _vph = _VP.H - _VP.T - _VP.B;
-    var _VC = {exact_pittsburgh:'#3b82f6', pittsburgh_proximity:'#16a34a', estimated_calvert:'#f59e0b'};
-    var _VN = {exact_pittsburgh:'Exact Pittsburgh', pittsburgh_proximity:'Proximity-Enhanced', estimated_calvert:'Est. Calvert City'};
+    var _VC = {exact_pittsburgh:'#3b82f6', pittsburgh_proximity:'#16a34a'};
+    var _VN = {exact_pittsburgh:'Exact Pittsburgh', pittsburgh_proximity:'Proximity-Enhanced'};
 
     function _vx(v) { return _VP.L + v * _vpw; }
     function _vy(v) { return _VP.T + (1 - v) * _vph; }
@@ -872,7 +856,7 @@ function renderMethodsTab() {
     // ROC
     var _rocSvg = '<svg viewBox="0 0 ' + _VP.W + ' ' + _VP.H + '" class="val-chart-svg">' + _vGrid('False Positive Rate', 'True Positive Rate');
     _rocSvg += '<line x1="' + _vx(0).toFixed(1) + '" y1="' + _vy(0).toFixed(1) + '" x2="' + _vx(1).toFixed(1) + '" y2="' + _vy(1).toFixed(1) + '" stroke="#94a3b8" stroke-width="0.9" stroke-dasharray="4,3"/>';
-    ['exact_pittsburgh', 'pittsburgh_proximity', 'estimated_calvert'].forEach(function(mk) {
+    ['exact_pittsburgh', 'pittsburgh_proximity'].forEach(function(mk) {
       var m = _mm.models[mk]; if (!m || !m.fpr) return;
       _rocSvg += _vPath(m.fpr, m.tpr, _VC[mk]);
     });
@@ -881,7 +865,7 @@ function renderMethodsTab() {
 
     // PR
     var _prSvg = '<svg viewBox="0 0 ' + _VP.W + ' ' + _VP.H + '" class="val-chart-svg">' + _vGrid('Recall', 'Precision');
-    ['exact_pittsburgh', 'pittsburgh_proximity', 'estimated_calvert'].forEach(function(mk) {
+    ['exact_pittsburgh', 'pittsburgh_proximity'].forEach(function(mk) {
       var m = _mm.models[mk]; if (!m || !m.recall) return;
       _prSvg += _vPath(m.recall, m.precision, _VC[mk]);
       if (m.thr_opt !== undefined && m.recall.length) {
@@ -895,7 +879,7 @@ function renderMethodsTab() {
 
     // Legend
     var _legHtml = '<div class="val-legend">';
-    ['exact_pittsburgh', 'pittsburgh_proximity', 'estimated_calvert'].forEach(function(mk) {
+    ['exact_pittsburgh', 'pittsburgh_proximity'].forEach(function(mk) {
       var m = _mm.models[mk]; if (!m) return;
       _legHtml += '<span class="val-legend-item"><span class="val-legend-dot" style="background:' + _VC[mk] + '"></span>' + _VN[mk] + ' (AUC ' + m.auc.toFixed(3) + ')</span>';
     });
@@ -906,9 +890,8 @@ function renderMethodsTab() {
     var _tblDef = {
       exact_pittsburgh:     {label:'Exact Pittsburgh',     basis:'Pittsburgh zip-day panel*'},
       pittsburgh_proximity: {label:'Proximity-Enhanced',   basis:'Pittsburgh zip-day panel'},
-      estimated_calvert:    {label:'Est. Calvert City',    basis:'Pittsburgh panel (hand-tuned†)'},
     };
-    ['exact_pittsburgh', 'pittsburgh_proximity', 'estimated_calvert'].forEach(function(mk) {
+    ['exact_pittsburgh', 'pittsburgh_proximity'].forEach(function(mk) {
       var m = _mm.models[mk], r = _tblDef[mk]; if (!m || !r) return;
       _tblHtml += '<tr><td>' + r.label + '</td><td>' + m.auc.toFixed(3) + '</td><td>' + (m.cv_auc ? m.cv_auc.toFixed(3) : '—') + '</td><td>' + (m.pseudo_r2 ? m.pseudo_r2.toFixed(3) : '—') + '</td><td style="font-size:0.78rem;color:#475569">' + r.basis + '</td></tr>';
     });
@@ -925,7 +908,6 @@ function renderMethodsTab() {
       _tblHtml +
       '<p style="font-size:0.8rem;color:#64748b;margin-top:0.7rem;">' +
       '* <i>Exact Pittsburgh</i> is a daily city-wide model; evaluated here on the zip-day panel, so its AUC (0.76) reflects cross-zip discrimination only — on its native daily panel it achieves AUC 0.87.' +
-      '<br>† <i>Est. Calvert City</i> is hand-tuned for Calvert terrain (not re-fitted from data); no Calvert validation set exists yet, so curves show Pittsburgh panel performance only.' +
       '</p>' +
       '</div>';
   }

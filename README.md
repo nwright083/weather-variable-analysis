@@ -60,13 +60,12 @@ The browser loads those JSON files and computes the **ORI (Odor Risk Index)** li
 
 ---
 
-## The three production models
+## The production models
 
 | Mode | Description | Best for |
 |------|-------------|----------|
-| **Pittsburgh Proximity-Enhanced** (default) | Pittsburgh logistic regression + wind direction alignment + distance-decay from source | General use; accounts for where you are relative to the industrial complex |
-| **Exact Pittsburgh** | Raw Pittsburgh model, no spatial terms | Uniform risk estimate across all tracts |
-| **Estimated Calvert** | Manually tuned coefficients for Calvert's chemical plant sources | When Pittsburgh coefficients seem off for local conditions |
+| **Exact Pittsburgh** (default) | Raw Pittsburgh model, no spatial terms | Uniform risk estimate across all tracts |
+| **Pittsburgh Proximity-Enhanced** | Pittsburgh logistic regression + wind direction alignment + distance-decay from source | General use; accounts for where you are relative to the industrial complex |
 | **Calvert Fitted** *(auto-appears)* | Data-fitted from real Calvert odor reports | Most accurate once enough local reports exist (see below) |
 
 ### ORI formula

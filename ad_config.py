@@ -8,7 +8,7 @@ for routine config changes.
 
 # ── Model & Threshold ────────────────────────────────────────────────────────
 # Which forecast model to evaluate when deciding whether to trigger ads.
-# Options: "pittsburgh_proximity", "exact_pittsburgh", "estimated_calvert",
+# Options: "pittsburgh_proximity", "exact_pittsburgh",
 #           "calvert_fitted" (if fitted model exists)
 MODEL_MODE = "pittsburgh_proximity"
 
