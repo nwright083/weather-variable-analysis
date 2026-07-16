@@ -366,9 +366,16 @@ def fetch_forecasts(locations):
             df_hourly['time'] = pd.to_datetime(df_hourly['time'])
             df_hourly['date'] = df_hourly['time'].dt.strftime('%Y-%m-%d')
 
-            # PBLH conversion (meters -> feet)
+            # PBLH -> feet, UNIT-AWARE. Open-Meteo returns BLH in FEET when precipitation_unit=inch
+            # selects the imperial length system, and in METERS otherwise. Convert only from meters
+            # so the feature always lands on the training scale (ERA5 m x 3.28084 = ft) and is never
+            # double-converted. (This line previously always x3.28084, double-converting the
+            # already-feet value ~3.3x — inconsistent with backfill_blh_era5.py, which trained on
+            # ERA5 meters converted to feet exactly once.)
             if 'boundary_layer_height' in df_hourly.columns:
-                df_hourly['boundary_layer_height_ft'] = df_hourly['boundary_layer_height'] * 3.28084
+                _blh_unit = str(loc_data.get('hourly_units', {}).get('boundary_layer_height', 'm')).lower()
+                _blh_factor = 3.28084 if _blh_unit.startswith('m') else 1.0
+                df_hourly['boundary_layer_height_ft'] = df_hourly['boundary_layer_height'] * _blh_factor
             else:
                 df_hourly['boundary_layer_height_ft'] = 1500.0
 
@@ -550,9 +557,13 @@ def fetch_hourly_forecasts(locations):
             df['datetime'] = df['time'].dt.strftime('%Y-%m-%dT%H:%M')
             df['hour'] = df['time'].dt.hour
 
-            # BLH: meters → feet
+            # BLH -> feet, UNIT-AWARE (see fetch_forecasts): Open-Meteo returns feet when
+            # precipitation_unit=inch is set, meters otherwise. Convert only from meters so the
+            # value is never double-converted and matches the training scale.
             if 'boundary_layer_height' in df.columns:
-                df['boundary_layer_height'] = df['boundary_layer_height'] * 3.28084
+                _blh_unit = str(loc_data.get('hourly_units', {}).get('boundary_layer_height', 'm')).lower()
+                _blh_factor = 3.28084 if _blh_unit.startswith('m') else 1.0
+                df['boundary_layer_height'] = df['boundary_layer_height'] * _blh_factor
             else:
                 df['boundary_layer_height'] = 1500.0
 
@@ -708,9 +719,16 @@ def fetch_historical_weather(locations):
             df_hourly['time'] = pd.to_datetime(df_hourly['time'])
             df_hourly['date'] = df_hourly['time'].dt.strftime('%Y-%m-%d')
 
-            # PBLH conversion (meters -> feet)
+            # PBLH -> feet, UNIT-AWARE. Open-Meteo returns BLH in FEET when precipitation_unit=inch
+            # selects the imperial length system, and in METERS otherwise. Convert only from meters
+            # so the feature always lands on the training scale (ERA5 m x 3.28084 = ft) and is never
+            # double-converted. (This line previously always x3.28084, double-converting the
+            # already-feet value ~3.3x — inconsistent with backfill_blh_era5.py, which trained on
+            # ERA5 meters converted to feet exactly once.)
             if 'boundary_layer_height' in df_hourly.columns:
-                df_hourly['boundary_layer_height_ft'] = df_hourly['boundary_layer_height'] * 3.28084
+                _blh_unit = str(loc_data.get('hourly_units', {}).get('boundary_layer_height', 'm')).lower()
+                _blh_factor = 3.28084 if _blh_unit.startswith('m') else 1.0
+                df_hourly['boundary_layer_height_ft'] = df_hourly['boundary_layer_height'] * _blh_factor
             else:
                 df_hourly['boundary_layer_height_ft'] = 1500.0
 
