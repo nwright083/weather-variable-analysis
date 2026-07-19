@@ -46,27 +46,41 @@ already capped by the human during setup.
 - Relevant endpoints we use: `GET /v1/order-lines/:id` (get), `GET /v1/order-lines` (list),
   `:requestReview`, `:cancelDeployment`, `GET` balance (`get-balance`), and possibly
   `pauseSchedules` / `playSchedules` (see Open Question).
+- **Deploy-timing constraint (rep, 2026-07-19):** deploys are processed on El Toro's side
+  during **weekday business hours (Eastern; El Toro is Louisville, KY)**. Once deployed, a
+  campaign *runs* on later days including weekends. Practical consequence: you cannot deploy
+  same-day for an arbitrary day — to cover a high-odor **weekend**, deploy by **Friday**
+  during business hours. Once deployed for a weekend, that spend is effectively **committed**
+  (likely cannot be cheaply killed mid-flight), so the Friday decision is the real
+  spend commitment.
+- **Credentials (rep, 2026-07-19):** the `client_id` / `client_secret` are **provisioned by
+  El Toro's team** during onboarding (not self-serve in the portal). Operator waits for them,
+  then pastes into `.env`. Automated API triggering is supported.
 
-### Open question (confirm with El Toro rep — one-method fill-in)
+### Rep responses (2026-07-19) and remaining follow-ups
 
-How is an order line **re-enabled after being stopped**? Three possibilities, isolated
-in a single private method `_set_serving()`:
+**Answered:**
+- Automated API triggering is supported.
+- Credentials are provisioned by El Toro's team (not self-serve).
+- Deploys are processed during **weekday business hours (ET)**; campaigns run on later days
+  incl. weekends. This means the "re-enable" primitive is almost certainly **not** instant
+  24/7 pause/play — it's a business-hours deploy for an upcoming flight.
 
-1. **Re-review each time** — `cancelDeployment` then later `requestReview` again; not instant.
-2. **Pause / Play (no re-review)** — `pauseSchedules` / `playSchedules`; instant, ideal.
-3. **One-directional** — cancel tears down; re-enable requires clone/recreate; worst case.
+**Still open (isolated in the single private method `_set_serving()` — a one-method fill-in):**
+1. **Flight granularity:** can we deploy a **1-day** flight (e.g., a high-odor Tuesday), or is
+   the minimum flight a weekend block / multi-day? Determines how finely the look-ahead maps
+   to deploys.
+2. **Re-enable after stop:** after `cancelDeployment` on an order line that has run, do we
+   turn it back on via `requestReview` again (re-review), or a resume/`playSchedules`?
+3. **Deactivation timing:** can a deployed (esp. weekend) flight be stopped early, or is it
+   committed once deployed? (Money exposure of the deploy decision.)
+4. **API-call timing:** must the API *call* itself land during business hours, or can we call
+   any time and El Toro queues it for the next business-hours processing?
+5. **Serve latency + billing:** after a deploy is processed, how long until ads serve, and are
+   we billed only for serving time?
 
-Preferred answer: #2. The daily toggle strategy adapts to whichever is true without
-changing anything outside `_set_serving()`. If #1, the script holds an order line on
-for a minimum stretch rather than cycling daily.
-
-Questions for the rep:
-1. After `cancelDeployment` on an order line that has run, how do I turn it back on —
-   re-review, or resume?
-2. Do `pauseSchedules` / `playSchedules` pause a live order line and resume it without re-review?
-3. Minimum flight duration / limit on start-stop frequency for the same order line?
-4. On resume/re-deploy, how long until ads actually serve?
-5. Am I billed for the paused gap, or only for serving time?
+The daily toggle strategy adapts to whichever answers come back without changing anything
+outside `_set_serving()` and the coverage-window config.
 
 ## Model selection and thresholds
 
@@ -132,8 +146,16 @@ Produced at setup. Schema:
 - `MODEL_REGISTRY`: maps each model mode → `{coeff_key, threshold}` with provenance comments.
 - `MODEL_MODE = "exact_pittsburgh"` (default). `ORI_THRESHOLD = None` → use the model's
   bound threshold; a non-None value is an explicit override.
-- `FORECAST_HORIZON_DAYS = 1` (next-day; configurable).
 - `MAX_ACTIVE_TRACTS`: a concrete integer cap (not `None`) as a budget safeguard.
+- **Coverage window (replaces a fixed horizon):** because deploys happen on weekday business
+  hours and cover later days, the script deploys for the range from the next day through the
+  day before the next weekday run. `COVERAGE_LOOKAHEAD` config: on Mon–Thu → cover tomorrow;
+  on Friday → cover Sat + Sun + Mon. Computed from the run's weekday, configurable. A tract is
+  triggered if the **peak ORI across the covered days** exceeds its model threshold.
+- **Deploy-window guard:** `BUSINESS_HOURS_TZ` (default `America/New_York`),
+  `BUSINESS_HOURS` (e.g., Mon–Fri 09:00–17:00), and `BUSINESS_HOURS_ENFORCEMENT` =
+  `"warn"` (default, per operator) or `"hard"` (refuse deploys outside the window). Warn-only
+  logs a warning but proceeds; flipping to `"hard"` is a one-line config change.
 - El Toro settings: `AD_PROVIDER`, `ELTORO_ENABLED = False` (kill switch),
   `ELTORO_BASE_URL`, `ELTORO_MAPPING_FILE` path, `ELTORO_ENV` (dev/prod).
 
@@ -143,9 +165,18 @@ Produced at setup. Schema:
   2. `ELTORO_ENABLED = True` in `ad_config.py`.
   Missing either → dry-run; nothing is sent to El Toro.
 - Model→threshold binding via the registry (CLI `--threshold` still overrides for a run).
+- **Coverage window:** evaluates the peak ORI across the covered days (weekday-aware; Friday
+  covers the weekend + Monday) rather than a single fixed horizon day.
+- **Business-hours guard:** on a real run, if outside the configured ET window, warn (default)
+  or refuse (`"hard"`).
 - Pre-flight before any deploy: confirm the token works; optionally check balance.
 - Enforce `MAX_ACTIVE_TRACTS` (existing logic).
 - Full decision logging to `ad_decisions.log` and state to `ad_state.json` (existing).
+
+### Scheduling
+- Intended to run **each weekday morning during ET business hours** (cron or GitHub Actions
+  with an ET-aligned schedule), after the daily forecast refresh. The coverage-window logic
+  makes Friday's run cover the weekend automatically. Not run on weekends (nothing to deploy).
 
 ## Testing (all runnable before a real key exists)
 
