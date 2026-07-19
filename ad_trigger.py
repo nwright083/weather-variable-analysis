@@ -36,6 +36,92 @@ logger = logging.getLogger("ad_trigger")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Money-safety gates (pure, auditable)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def effective_dry_run(
+    *,
+    live: bool,
+    provider_name: str,
+    eltoro_enabled: bool,
+    force_dry_run: bool = False,
+) -> bool:
+    """Decide whether a run is dry (no provider calls) — the two-key live gate.
+
+    A run performs real provider actions ONLY when the operator explicitly opts in
+    with `live=True`, and — for the El Toro provider specifically — the
+    ELTORO_ENABLED kill-switch is also on. Anything else is dry-run.
+
+    Returns True for dry-run (safe), False to perform real actions.
+    """
+    if force_dry_run:
+        return True
+    if not live:
+        return True
+    if provider_name == "eltoro" and not eltoro_enabled:
+        return True
+    return False
+
+
+def coverage_dates(run_date: datetime.date) -> list[datetime.date]:
+    """Which forecast days a run should deploy for, given El Toro deploys during
+    weekday business hours and campaigns then run on later days.
+
+    - Mon–Thu run  -> cover the next day.
+    - Friday run   -> cover Sat + Sun + Mon (no deploy happens over the weekend).
+    - Sat/Sun run  -> cover the next day (not the intended cadence, but safe).
+    """
+    if run_date.weekday() == 4:  # Friday
+        return [run_date + datetime.timedelta(days=n) for n in (1, 2, 3)]
+    return [run_date + datetime.timedelta(days=1)]
+
+
+def business_hours_status(
+    dt_utc: datetime.datetime,
+    *,
+    tz_name: str,
+    start_hour: int,
+    end_hour: int,
+    business_days,
+) -> tuple[bool, datetime.datetime]:
+    """Return (within_window, local_datetime) for a UTC datetime.
+
+    Within = a business day AND start_hour <= local hour < end_hour.
+    """
+    local = dt_utc
+    try:
+        from zoneinfo import ZoneInfo
+        local = dt_utc.astimezone(ZoneInfo(tz_name))
+    except Exception:  # pragma: no cover - tz db missing; fall back to given time
+        logger.warning(f"Could not load timezone {tz_name!r}; using UTC for business-hours check.")
+    within = (local.weekday() in tuple(business_days)) and (start_hour <= local.hour < end_hour)
+    return within, local
+
+
+def _business_hours_guard(now_utc: datetime.datetime) -> bool:
+    """Warn (or, in 'hard' mode, abort) if a real deploy runs outside El Toro's
+    weekday business-hours window."""
+    tz = getattr(ad_config, "BUSINESS_HOURS_TZ", "America/New_York")
+    start = getattr(ad_config, "BUSINESS_HOURS_START", 9)
+    end = getattr(ad_config, "BUSINESS_HOURS_END", 17)
+    days = getattr(ad_config, "BUSINESS_DAYS", (0, 1, 2, 3, 4))
+    mode = getattr(ad_config, "BUSINESS_HOURS_ENFORCEMENT", "warn")
+    within, local = business_hours_status(
+        now_utc, tz_name=tz, start_hour=start, end_hour=end, business_days=days
+    )
+    if not within:
+        msg = (
+            f"Deploy running outside El Toro business hours "
+            f"({local:%a %Y-%m-%d %H:%M} {tz}). El Toro processes deploys on weekday "
+            f"business hours; ads may not go live as expected."
+        )
+        if mode == "hard":
+            raise RuntimeError(msg + "  [BUSINESS_HOURS_ENFORCEMENT='hard' — aborting run]")
+        logger.warning(msg + "  [warn-only]")
+    return within
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # ORI computation (mirrors model.js / odor_forecast_core.predict_ori)
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -190,6 +276,84 @@ def evaluate_tracts(
     return results
 
 
+def evaluate_window(
+    forecast_path: str,
+    meta_path: str,
+    model_mode: str,
+    threshold: float,
+    target_dates: list[str],
+) -> list[dict]:
+    """Evaluate each tract's PEAK ORI across a set of forecast days.
+
+    Used by the weekday-aware coverage window: a Friday deploy covers Sat/Sun/Mon, so a
+    tract should get ads if ANY covered day is high-odor. We report the peak day and score.
+    Target dates not present in the forecast are skipped (with a warning).
+
+    Returns the same per-tract dict shape as evaluate_tracts, plus "covered_dates".
+    """
+    with open(forecast_path) as f:
+        forecast = json.load(f)
+    with open(meta_path) as f:
+        meta = json.load(f)
+
+    coeffs = meta["coeffs"][model_mode]
+    pressure_offset = meta.get("pressure_offset", 17.4)
+    locations = forecast["locations"]
+    all_features = forecast["features"]
+
+    present = [d for d in target_dates if d in all_features]
+    missing = [d for d in target_dates if d not in all_features]
+    if missing:
+        logger.warning(
+            f"Coverage day(s) {missing} not in forecast — skipping them. "
+            f"Evaluating: {present or '(none)'}"
+        )
+    if not present:
+        logger.error(f"No covered forecast days available (wanted {target_dates}).")
+        return []
+
+    threshold_ori = threshold * 100.0
+    logger.info(
+        f"Evaluating {model_mode} across {len(present)} covered day(s): {present} "
+        f"(threshold {threshold:.1%} = ORI {threshold_ori:.1f})"
+    )
+
+    results = []
+    for loc in locations:
+        tract_id = loc["id"]
+        tract_name = loc["name"]
+
+        peak_ori = None
+        peak_date = None
+        for d in present:
+            cell = all_features[d].get(tract_id)
+            if cell is None:
+                continue
+            ori = compute_ori_from_features(cell, coeffs, pressure_offset)
+            if peak_ori is None or ori > peak_ori:
+                peak_ori = ori
+                peak_date = d
+        if peak_ori is None:
+            logger.warning(f"No features for tract {tract_id} ({tract_name}) on any covered day")
+            continue
+
+        results.append({
+            "tract_id": tract_id,
+            "name": tract_name,
+            "date": peak_date,
+            "covered_dates": present,
+            "ori": peak_ori,
+            "ori_probability": round(peak_ori / 100.0, 4),
+            "threshold": threshold,
+            "threshold_ori": round(threshold_ori, 1),
+            "triggered": peak_ori >= threshold_ori,
+        })
+
+    triggered_count = sum(1 for r in results if r["triggered"])
+    logger.info(f"  {triggered_count}/{len(results)} tracts exceed threshold (peak across window)")
+    return results
+
+
 def apply_campaign_rules(
     results: list[dict],
     state: dict,
@@ -282,23 +446,52 @@ def apply_campaign_rules(
 
 def run_trigger(
     *,
-    dry_run: bool = False,
+    live: bool = False,
+    dry_run: bool | None = None,
     threshold: float | None = None,
     horizon: int | None = None,
     provider_name: str | None = None,
     model_mode: str | None = None,
+    provider=None,
+    today: datetime.date | None = None,
 ):
-    """Main entry point: evaluate forecast, apply rules, trigger ad provider."""
+    """Main entry point: evaluate forecast, apply rules, trigger ad provider.
 
-    # Resolve config (CLI overrides > ad_config defaults)
-    _threshold = threshold if threshold is not None else ad_config.ORI_THRESHOLD
-    _horizon = horizon if horizon is not None else ad_config.FORECAST_HORIZON_DAYS
+    MONEY SAFETY: performs REAL provider actions only when `live=True` AND — for the
+    El Toro provider — ad_config.ELTORO_ENABLED is True. Everything else is a dry run
+    that computes and logs the plan but calls no provider. `dry_run=True` forces dry.
+
+    Args:
+        live:          Opt in to real actions (still gated by ELTORO_ENABLED for eltoro).
+        dry_run:       Force a dry run regardless of `live` (used by --dry-run and tests).
+        threshold:     Override the alert threshold (0–1). None → model's bound threshold.
+        horizon:       Manual single-day override (indexes forecast dates). None → use the
+                       weekday-aware coverage window.
+        provider:      Inject an AdProvider (tests); None → build from provider_name.
+        today:         Reference date for the coverage window (tests); None → today().
+    """
+    # Resolve config (args override > ad_config defaults)
     _model = model_mode or ad_config.MODEL_MODE
+    _override = threshold if threshold is not None else ad_config.ORI_THRESHOLD
+    _threshold = ad_config.resolve_threshold(_model, override=_override)
     _provider_name = provider_name or ad_config.AD_PROVIDER
     _duration = ad_config.CAMPAIGN_DURATION_DAYS
     _cooldown = ad_config.COOLDOWN_DAYS
     _max_active = ad_config.MAX_ACTIVE_TRACTS
     _target_tracts = ad_config.TARGET_TRACTS
+    _eltoro_enabled = getattr(ad_config, "ELTORO_ENABLED", False)
+
+    _dry = effective_dry_run(
+        live=live,
+        provider_name=_provider_name,
+        eltoro_enabled=_eltoro_enabled,
+        force_dry_run=bool(dry_run),
+    )
+    if live and not dry_run and _dry:
+        logger.warning(
+            f"--live requested but provider={_provider_name!r} is gated OFF "
+            f"(ELTORO_ENABLED={_eltoro_enabled}). Running DRY — no spend."
+        )
 
     # Load data
     if not os.path.exists(ad_config.FORECAST_JSON):
@@ -308,12 +501,27 @@ def run_trigger(
         )
         return None
 
-    results = evaluate_tracts(
+    # Which forecast day(s) does this run cover?
+    if horizon is not None:
+        with open(ad_config.FORECAST_JSON) as f:
+            _fdates = json.load(f)["dates"]
+        idx = min(horizon, len(_fdates) - 1)
+        if horizon >= len(_fdates):
+            logger.warning(
+                f"Horizon {horizon} exceeds available forecast days ({len(_fdates)}); "
+                f"using last day {_fdates[idx]}."
+            )
+        target_dates = [_fdates[idx]]
+    else:
+        _today = today or datetime.date.today()
+        target_dates = [d.isoformat() for d in coverage_dates(_today)]
+
+    results = evaluate_window(
         ad_config.FORECAST_JSON,
         ad_config.META_JSON,
         _model,
         _threshold,
-        _horizon,
+        target_dates,
     )
     if not results:
         logger.error("No tracts evaluated — check forecast data.")
@@ -327,8 +535,13 @@ def run_trigger(
     now_utc = datetime.datetime.now(datetime.timezone.utc)
     decisions = []
 
-    if dry_run:
+    if _dry:
         logger.info("=== DRY RUN — no provider calls will be made ===")
+    else:
+        if _provider_name == "eltoro":
+            _business_hours_guard(now_utc)
+        # Resolve the provider ONCE (injectable for tests).
+        provider = provider or get_provider(_provider_name)
 
     # Deactivate expired campaigns
     for d in to_deactivate:
@@ -341,8 +554,7 @@ def run_trigger(
         }
         decisions.append(decision)
 
-        if not dry_run:
-            provider = get_provider(_provider_name)
+        if not _dry:
             provider.deactivate_campaign(d["campaign_id"])
             # Remove from active
             state["active_campaigns"].pop(d["tract_id"], None)
@@ -370,8 +582,7 @@ def run_trigger(
         }
         decisions.append(decision)
 
-        if not dry_run:
-            provider = get_provider(_provider_name)
+        if not _dry:
             result = provider.activate_campaign(
                 tract_id=r["tract_id"],
                 tract_name=r["name"],
@@ -381,7 +592,7 @@ def run_trigger(
                 metadata={
                     "model_mode": _model,
                     "threshold": _threshold,
-                    "horizon_days": _horizon,
+                    "covered_dates": r.get("covered_dates", [start_date]),
                 },
             )
             campaign_id = result.get("campaign_id", "unknown")
@@ -399,11 +610,6 @@ def run_trigger(
             f"ORI={r['ori']:.1f}  dates={start_date}→{end_date}"
         )
 
-    # No-action tracts (for the log)
-    no_action_count = len(results) - len(to_activate) - len(
-        [r for r in results if r["tract_id"] in [d["tract_id"] for d in to_deactivate]]
-    )
-
     # Update state
     state["last_run_utc"] = now_utc.isoformat()
     state["history"].extend(decisions)
@@ -412,19 +618,19 @@ def run_trigger(
     if len(state["history"]) > 500:
         state["history"] = state["history"][-500:]
 
-    if not dry_run:
+    if not _dry:
         save_state(state, ad_config.STATE_FILE)
 
     # Write decision log
-    _write_log(decisions, results, _model, _threshold, dry_run)
+    _write_log(decisions, results, _model, _threshold, _dry)
 
     # Print summary
     print(f"\n{'═' * 60}")
-    print(f"  Ad Trigger Summary  {'(DRY RUN)' if dry_run else ''}")
+    print(f"  Ad Trigger Summary  {'(DRY RUN)' if _dry else '(LIVE)'}")
     print(f"{'═' * 60}")
     print(f"  Model:     {_model}")
     print(f"  Threshold: {_threshold:.1%} (ORI ≥ {_threshold * 100:.1f})")
-    print(f"  Horizon:   {_horizon} day(s)")
+    print(f"  Covers:    {', '.join(target_dates)}")
     print(f"  Provider:  {_provider_name}")
     print(f"  Duration:  {_duration} day(s)")
     print(f"{'─' * 60}")
@@ -494,16 +700,22 @@ def main():
         description="Evaluate odor forecast and trigger ad campaigns for Smell My City."
     )
     parser.add_argument(
+        "--live", action="store_true",
+        help="Perform REAL provider actions. Default is dry-run (no spend). For the El Toro "
+             "provider this ALSO requires ad_config.ELTORO_ENABLED = True."
+    )
+    parser.add_argument(
         "--dry-run", action="store_true",
-        help="Evaluate and report without calling the ad provider or saving state."
+        help="Force a dry run (default behavior; explicit for clarity/scripts)."
     )
     parser.add_argument(
         "--threshold", type=float, default=None,
-        help=f"Override ORI threshold (0–1 probability). Default: {ad_config.ORI_THRESHOLD}"
+        help="Override ORI threshold (0–1). Default: the selected model's bound threshold."
     )
     parser.add_argument(
         "--horizon", type=int, default=None,
-        help=f"Override forecast horizon in days. Default: {ad_config.FORECAST_HORIZON_DAYS}"
+        help="Manual single-day override (indexes forecast dates). Default: weekday-aware "
+             "coverage window (Fri covers the weekend)."
     )
     parser.add_argument(
         "--provider", type=str, default=None,
@@ -528,6 +740,7 @@ def main():
     )
 
     run_trigger(
+        live=args.live,
         dry_run=args.dry_run,
         threshold=args.threshold,
         horizon=args.horizon,
