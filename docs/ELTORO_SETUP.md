@@ -99,14 +99,26 @@ refresh. The coverage window makes Friday's run cover Sat + Sun + Mon automatica
    business hours?
 8. Am I **billed only for serving time**, or also for paused/gap periods?
 
-### C. Targeting & account
-9. For census-tract **polygons**, what's the right El Toro product — a **geoframe** around
-   the area, or an **IP-targeting audience** built from addresses in the tract? Does
-   `create-json-target` accept polygons/GeoJSON?
-10. What are my **`org_id`** and the **`campaign_id`** to use, and can order lines be
-    listed/filtered by campaign via the API (`list-order-lines`) so I can auto-populate
-    the mapping?
-11. What is the correct **balance / billing** endpoint for a pre-flight spend check?
+### C. Account
+9. What are my **`org_id`** and the **`campaign_id`** to use, and can order lines be
+   listed/filtered by campaign via the API (`list-order-lines`) so I can auto-populate
+   the mapping?
+10. **Pre-flight billing/balance check** — before the automated job activates order lines,
+    I want one read-only call to confirm the account can spend:
+    - Which endpoint returns the org's **current balance / available funds** — is it
+      `get-balance`? Exact path, response shape, and units (cents vs dollars)?
+    - Is the account **pre-paid credit** or **post-paid/invoiced**? How do I read remaining
+      credit / any credit limit?
+    - Is there a field that reports **billing is "ready"** for the org (what the portal's
+      "billing details required" banner reflects)? Is that `get-billing-org`?
+    - Can I read **spent-to-date / remaining budget per order line or campaign**
+      (`list-order-lines`, `get-stats`, `get-device-stats`) to avoid re-activating an
+      order line that has exhausted its budget?
+
+### Setup-time only (rep will guide; NOT needed by the automation)
+- For census-tract **polygons**, what's the right El Toro product — a **geoframe** around
+  the area, or an **IP-targeting audience** built from addresses in the tract? (Only
+  relevant when creating the order lines in the portal; the toggle script never sees it.)
 
 ### D. Environment
 12. Confirm the **production base URL** — docs say `https://hagrid.api.eltoro.com` but warn
