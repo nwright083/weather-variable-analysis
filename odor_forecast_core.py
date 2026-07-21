@@ -34,6 +34,18 @@ import requests
 IND_LAT = 37.0486
 IND_LON = -88.3480
 
+# Odor emission sources for the proximity model. The Calvert City complex is the
+# primary cluster; the TVA Shawnee Fossil Plant (West Paducah, ~10 mi NW of Paducah)
+# is a large coal SO2 emitter — SO2 is the same odorant proxy the Pittsburgh
+# validation used. Exposure is SUMMED across sources (see compute_multisource_terms),
+# which brings Calvert's exposure scale closer to the multi-emitter Pittsburgh panel
+# the multi_source_exposure / wind_align_weighted coefficients were fit on.
+ODOR_SOURCES = [
+    {"name": "Calvert City Industrial Complex", "lat": IND_LAT, "lon": IND_LON},
+    {"name": "TVA Shawnee Fossil Plant",        "lat": 37.1533, "lon": -88.7739},
+]
+SOURCE_DECAY_K = 0.02  # exp(-k * distance_miles); matches the deployed proximity fit
+
 # Elevation-adjusted pressure offset (cross-city transfer correction):
 # Pittsburgh training mean surface pressure = 980.93 hPa (~370 m ASL);
 # Calvert City / western KY mean ≈ 998.3 hPa (~115 m ASL). Subtracting this offset
@@ -220,6 +232,47 @@ def compute_continuous_wind_alignment(wind_from_deg, bearing_deg):
     return (1 + math.cos(angle_diff)) / 2
 
 
+def _pair_distance_miles(lat1, lon1, lat2, lon2):
+    """Haversine distance in miles between two arbitrary points."""
+    R = 3958.8
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlam = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2.0)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2.0)**2
+    return R * 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
+
+
+def _source_bearing(src_lat, src_lon, recv_lat, recv_lon):
+    """Bearing (deg) FROM an emission source TO a receiver location."""
+    dy = recv_lat - src_lat
+    dx = (recv_lon - src_lon) * math.cos(math.radians(src_lat))
+    return (math.degrees(math.atan2(dx, dy)) + 360) % 360
+
+
+def compute_multisource_terms(lat, lon, wind_from_deg, sources=None, k=SOURCE_DECAY_K):
+    """Summed multi-source exposure and exposure-weighted wind alignment for a location.
+
+    exposure   = Σ_i exp(-k · d_i)                          (proximity term input)
+    alignment  = Σ_i [exp(-k · d_i) · align_i] / Σ_i exp(-k · d_i)   (wind term input)
+
+    where d_i is miles to source i and align_i is the continuous 0–1 wind-alignment
+    for that source. Weighting the alignment by exposure makes the wind term reflect
+    whichever sources actually dominate the receiver's exposure.
+    """
+    if sources is None:
+        sources = ODOR_SOURCES
+    exp_sum = 0.0
+    weighted_align = 0.0
+    for s in sources:
+        d = _pair_distance_miles(lat, lon, s["lat"], s["lon"])
+        w = math.exp(-k * d)
+        a = compute_continuous_wind_alignment(
+            wind_from_deg, _source_bearing(s["lat"], s["lon"], lat, lon))
+        exp_sum += w
+        weighted_align += w * a
+    return exp_sum, (weighted_align / exp_sum if exp_sum > 0 else 0.5)
+
+
 # Sector bounds derived from calvert_zips.geojson via scratch/test_sectors.py;
 # regenerate them if the geojson boundaries change.
 def check_wind_alignment(wind_from, location_or_bearing, tolerance=10.0):
@@ -276,7 +329,11 @@ def get_risk_meta(ori):
         return "High Risk", "badge-high", [220, 38, 38]
 
 
-def predict_ori(row, coeffs, *, use_wind_filter=True, wind_penalty=0.25, wind_boost=1.0, use_distance_decay=False, distance_decay_rate=0.0, use_continuous_alignment=False):
+def predict_ori(row, coeffs, *, use_wind_filter=True, wind_penalty=0.25, wind_boost=1.0, use_distance_decay=False, distance_decay_rate=0.0, use_continuous_alignment=False, apply_pressure_transfer=True):
+    # Pressure elevation offset expresses Calvert pressure in Pittsburgh's training
+    # frame. It is the ONLY difference between an "Exact" model (transfer off) and its
+    # "Transfer" twin (transfer on); every other input is normalized identically.
+    pressure_offset = PRESSURE_ELEVATION_OFFSET if apply_pressure_transfer else 0.0
     z = (
         coeffs['const'] +
         coeffs['temperature'] * row['temperature'] +
@@ -287,8 +344,7 @@ def predict_ori(row, coeffs, *, use_wind_filter=True, wind_penalty=0.25, wind_bo
         coeffs['precipitation'] * row['precipitation'] +
         coeffs['diurnal_temperature_range'] * row['diurnal_temperature_range'] +
         coeffs['boundary_layer_height'] * row['boundary_layer_height'] +
-        # Subtract elevation offset so Calvert pressure is in Pittsburgh's training frame.
-        coeffs['atmospheric_pressure'] * (row['atmospheric_pressure'] - PRESSURE_ELEVATION_OFFSET)
+        coeffs['atmospheric_pressure'] * (row['atmospheric_pressure'] - pressure_offset)
     )
     if use_wind_filter:
         if use_continuous_alignment and 'wind_alignment' in row:
@@ -312,16 +368,20 @@ def predict_ori(row, coeffs, *, use_wind_filter=True, wind_penalty=0.25, wind_bo
             z -= distance_decay_rate * dist
 
     # Integrated proximity regression terms (present only in COEFFS_PITTSBURGH_PROXIMITY).
-    # For Calvert City (single source) multi_source_exposure = exp(-0.02 * distance).
+    # Prefer the precomputed multi-source aggregates (mse = summed exposure Σexp(-k·d_i),
+    # msa = exposure-weighted alignment); fall back to single-source Calvert if absent.
     if 'multi_source_exposure' in coeffs:
-        dist = row.get('distance_from_source', None)
-        if dist is None and 'latitude' in row and 'longitude' in row:
-            dist = calculate_distance(row['latitude'], row['longitude'])
-        if dist is not None:
-            z += coeffs['multi_source_exposure'] * math.exp(-0.02 * dist)
+        exposure = row.get('mse', None)
+        if exposure is None:
+            dist = row.get('distance_from_source', None)
+            if dist is None and 'latitude' in row and 'longitude' in row:
+                dist = calculate_distance(row['latitude'], row['longitude'])
+            exposure = math.exp(-SOURCE_DECAY_K * dist) if dist is not None else None
+        if exposure is not None:
+            z += coeffs['multi_source_exposure'] * exposure
 
     if 'wind_align_weighted' in coeffs:
-        wind_align = row.get('wind_alignment', None)
+        wind_align = row.get('msa', row.get('wind_alignment', None))
         if wind_align is None:
             bearing = row.get('bearing_from_source',
                                calculate_bearing(row.get('latitude', IND_LAT),

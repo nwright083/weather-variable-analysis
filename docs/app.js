@@ -1,5 +1,14 @@
 // Loads data + meta, wires the control panel, and renders all four tabs. ORI is
 // computed live via OdorModel using whatever coefficients/options the controls select.
+
+// Map a model mode to its metrics coefficient family. Exact/Transfer twins share a
+// family (the pressure offset is a uniform shift that does not change AUC/thresholds).
+function metricFamily(mode) {
+  if (String(mode).indexOf("proximity") !== -1) return "pittsburgh_proximity";
+  if (String(mode).indexOf("calvert_fitted") !== -1) return "calvert_fitted";
+  return "exact_pittsburgh";
+}
+
 const APP = {
   meta: null, forecast: null, historical: null, hourly: null,
   _callbacks: [],
@@ -23,8 +32,10 @@ const APP = {
     var isCustom = this.mode() === "custom";
     var wd = this.meta.wind_defaults;
     var dd = this.meta.distance_defaults;
+    var mo = this.meta.mode_offset;
     return {
-      pressureOffset: this.meta.pressure_offset,
+      // Exact models score with the offset OFF (0); Transfer models with it ON.
+      pressureOffset: (mo && mo[this.mode()] != null) ? mo[this.mode()] : this.meta.pressure_offset,
       windFilter: isCustom,
       continuousAlignment: true,
       penalty: isCustom
@@ -43,7 +54,9 @@ const APP = {
   alertThreshold() {
     var mode = this.mode();
     var mm = this.meta && this.meta.model_metrics && this.meta.model_metrics.models;
-    var md = mm && mm[mode];
+    // Metrics are keyed by coefficient family (weather-only vs proximity); the pressure
+    // offset does not change discrimination, so Exact/Transfer twins share a family.
+    var md = mm && (mm[mode] || mm[metricFamily(mode)]);
     if (!md) return 30;
     // Prefer the daily-level threshold when present (avoids the zip-day granularity artifact)
     var raw = (md.thr_opt_daily != null) ? md.thr_opt_daily : md.thr_opt;
@@ -89,13 +102,13 @@ function buildModeSelect() {
   });
   var custom = document.createElement("option"); custom.value = "custom"; custom.textContent = "Custom (manual)";
   sel.appendChild(custom);
-  sel.value = APP.meta.default_mode || "exact_pittsburgh";
+  sel.value = APP.meta.default_mode || "pittsburgh_transfer_proximity";
 }
 
 function buildCustomCoeffSliders() {
   var box = document.getElementById("custom-coeffs");
   var ranges = APP.meta.custom_slider_ranges;
-  var proxDefs = APP.meta.coeffs.pittsburgh_proximity || {};
+  var proxDefs = APP.meta.coeffs.pittsburgh_transfer_proximity || APP.meta.coeffs.pittsburgh_proximity || {};
   var wd = APP.meta.wind_defaults;
   var dd = APP.meta.distance_defaults;
 
@@ -536,29 +549,55 @@ function renderReportTab() {
 // prose stays editable without touching the data pipeline. Any mode present in
 // meta.mode_labels but missing here falls back to a generic description.
 var MODE_DOCS = {
-  pittsburgh_proximity: {
-    tagline: "Default. The only model aware of your location and the wind direction.",
-    data: "Pittsburgh zip-day panel — ~36,600 observations (every ZIP × every day), 2018–2026, logistic regression.",
-    how: "Beyond weather, it adds two spatial terms fitted in the same regression: <b>source proximity</b> " +
-      "(risk decays with distance from the Calvert City industrial complex) and <b>continuous wind alignment</b> " +
-      "(higher risk when the wind is actually carrying air from the source toward you). This is why the map " +
-      "shows different risk for different tracts on the same day.",
+  exact_pittsburgh: {
+    tagline: "The raw Pittsburgh model, coefficients untouched — a reference baseline.",
+    data: "Pittsburgh city-wide daily logistic regression, used exactly as fitted.",
+    how: "The raw Pittsburgh science applied to Calvert weather with no proximity terms and " +
+      "<b>no pressure-transfer correction</b>. Inputs are still put on the training scale (boundary-layer " +
+      "height in feet; reporting-calendar de-biased), but nothing Calvert-specific is added.",
+    notes: [
+      "Useful as a 'what does the original model say, untouched?' reference.",
+      "Differs from Pittsburgh Transfer only by the ~+0.8 pt pressure-elevation offset (turned off here).",
+    ],
+    best: "Reference/comparison baseline.",
+  },
+  exact_pittsburgh_proximity: {
+    tagline: "Raw Pittsburgh coefficients, plus location + wind awareness — no Calvert pressure correction.",
+    data: "Pittsburgh zip-day panel — ~36,600 observations (every tract × every day), 2018–2026.",
+    how: "Adds the two spatial terms below to the raw Pittsburgh coefficients, but keeps the " +
+      "pressure-transfer correction <b>off</b>. Use it to see the spatial model without the Calvert-frame nudge.",
+    notes: [
+      "Spatial terms make the map show different risk per tract on the same day.",
+      "Identical to Transfer + Proximity apart from the pressure offset.",
+    ],
+    best: "Comparison: the spatial model in its untransferred form.",
+  },
+  pittsburgh_transfer: {
+    tagline: "Pittsburgh model transferred into Calvert's frame — weather only.",
+    data: "Pittsburgh city-wide daily logistic regression, coefficients as fitted.",
+    how: "The Pittsburgh coefficients with the <b>Pittsburgh→Calvert pressure-elevation offset applied</b> " +
+      "(Calvert sits ~250 m lower, so its pressures are shifted into Pittsburgh's training frame). Still no " +
+      "proximity terms — every tract gets the same regional trapping score on a given day.",
+    notes: [
+      "The pressure offset is a small, uniform baseline shift, not a re-fit.",
+      "The non-spatial companion to the default model.",
+    ],
+    best: "A clean regional trapping signal, Calvert-frame corrected.",
+  },
+  pittsburgh_transfer_proximity: {
+    tagline: "Default. Calvert-frame corrected, and aware of where you are relative to the odor sources and the wind.",
+    data: "Pittsburgh zip-day panel — ~36,600 observations (every tract × every day), 2018–2026, logistic regression.",
+    how: "The most complete model: Pittsburgh coefficients with the pressure-transfer correction, plus two " +
+      "spatial terms fitted in the same regression — <b>summed source proximity</b> (exposure adds up over the " +
+      "Calvert City industrial complex <i>and</i> the TVA Shawnee Fossil Plant near Paducah, each decaying with " +
+      "distance) and <b>exposure-weighted wind alignment</b> (higher risk when the wind carries air from the " +
+      "dominant source toward you). This is why the map shows different risk for different tracts on the same day.",
     notes: [
       "Debiased: day-of-week and holiday <i>reporting</i> habits are removed so only weather/physics drive the score.",
       "Precipitation was corrected to −0.864 (the raw panel fit had an overfitting artifact that forced rainy days to 100%).",
-      "Less sensitive to raw temperature than the Calvert/Pittsburgh daily models — once proximity, wind alignment, and the inversion signal (DTR) are accounted for, absolute warmth adds little.",
+      "Multi-source: summing exposure over both emitters matches how the proximity coefficient was trained (on Pittsburgh's several emitters).",
     ],
-    best: "Best all-around choice: the only model with true spatial + wind-direction awareness.",
-  },
-  exact_pittsburgh: {
-    tagline: "The unmodified Pittsburgh model — a reference baseline.",
-    data: "Pittsburgh city-wide daily logistic regression, used exactly as trained.",
-    how: "The raw Pittsburgh science applied to Calvert weather with no terrain adjustment and no proximity terms. " +
-      "Only the elevation pressure-offset correction is applied.",
-    notes: [
-      "Useful as a 'what does the original model say, untouched?' reference.",
-    ],
-    best: "Reference/comparison baseline.",
+    best: "Best all-around choice and the conservative default: spatial + wind-direction aware, Calvert-frame corrected.",
   },
   calvert_fitted: {
     tagline: "Fitted directly from real Calvert City odor reports.",
@@ -659,12 +698,14 @@ function renderMethodsTab() {
 
   // ── Formula card ────────────────────────────────────────────────────────────
   (function () {
+    // Show the two coefficient families (the Exact/Transfer split is the pressure
+    // offset, not a coefficient, so it isn't a separate column here).
     var allModes = Object.keys(meta.coeffs || {}).filter(function(id) {
-      return ['exact_pittsburgh','pittsburgh_proximity'].indexOf(id) !== -1;
+      return ['exact_pittsburgh','pittsburgh_transfer_proximity'].indexOf(id) !== -1;
     });
     var modeLabels = {
-      exact_pittsburgh:     'Exact Pittsburgh',
-      pittsburgh_proximity: 'Proximity',
+      exact_pittsburgh:              'Weather-only',
+      pittsburgh_transfer_proximity: 'Proximity',
     };
 
     function fmt(val) {

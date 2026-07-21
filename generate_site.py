@@ -43,6 +43,12 @@ def _json_safe(o):
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 
+# loc_id (GEOID/ZIP) -> (lat, lon), for multi-source exposure aggregation.
+_COORDS_BY_ID = {}
+for _name, _info in core.LOCATIONS.items():
+    _parts = _name.split(" ", 2)
+    _COORDS_BY_ID[_parts[1] if len(_parts) > 1 else _name] = _info["coords"]
+
 
 def _location_directory():
     """Build the list of location objects included in every JSON payload."""
@@ -85,10 +91,18 @@ def build_feature_payload(df, dates_sorted):
             else:
                 alignment = 0.5
 
+            # Multi-source proximity aggregates (summed exposure + exposure-weighted
+            # alignment) for the proximity models; single-source Calvert fields above
+            # are retained for display, the wind filter, and the hourly tab.
+            lat, lon = _COORDS_BY_ID.get(loc_id, (core.IND_LAT, core.IND_LON))
+            mse, msa = core.compute_multisource_terms(lat, lon, float(row["wind_direction"]))
+
             per_zip[loc_id] = {
                 "aligned": bool(aligned),
                 "wind_alignment": alignment,
                 "distance": round(float(row["distance_from_source"]), 2),
+                "mse": round(mse, 4),
+                "msa": round(msa, 3),
                 "temp": round(float(row["temperature"]), 2),
                 "temp_sq": round(float(row["temperature_squared"]), 2),
                 "solar": round(float(row["solar_radiation"]), 2),
@@ -174,24 +188,42 @@ def build_meta():
         "boost": [1.0, 3.0, 0.05],
         "decay_rate": [0.0, 0.5, 0.01],
     }
+    # Four deployed models — a 2x2 of {input transfer} x {spatial}:
+    #   input transfer: Exact (pressure offset OFF) vs Transfer (offset ON)
+    #   spatial:        weather-only vs Proximity (summed multi-source terms)
+    # The proximity pair reuses COEFFS_PITTSBURGH_PROXIMITY; the offset is the ONLY
+    # difference between an Exact model and its Transfer twin (mode_offset below).
+    OFF = core.PRESSURE_ELEVATION_OFFSET
     coeffs = {
-        "exact_pittsburgh": core.COEFFS_PITTSBURGH,
-        "pittsburgh_proximity": core.COEFFS_PITTSBURGH_PROXIMITY,
+        "exact_pittsburgh":               core.COEFFS_PITTSBURGH,
+        "exact_pittsburgh_proximity":     core.COEFFS_PITTSBURGH_PROXIMITY,
+        "pittsburgh_transfer":            core.COEFFS_PITTSBURGH,
+        "pittsburgh_transfer_proximity":  core.COEFFS_PITTSBURGH_PROXIMITY,
     }
     mode_labels = {
-        "exact_pittsburgh": "Exact Pittsburgh Model",
-        "pittsburgh_proximity": "Pittsburgh Proximity-Enhanced",
+        "exact_pittsburgh":               "Exact Pittsburgh",
+        "exact_pittsburgh_proximity":     "Exact Pittsburgh + Proximity",
+        "pittsburgh_transfer":            "Pittsburgh Transfer",
+        "pittsburgh_transfer_proximity":  "Pittsburgh Transfer + Proximity",
     }
-    default_mode = "exact_pittsburgh"
+    mode_offset = {
+        "exact_pittsburgh":               0.0,
+        "exact_pittsburgh_proximity":     0.0,
+        "pittsburgh_transfer":            OFF,
+        "pittsburgh_transfer_proximity":  OFF,
+    }
+    # Most-corrected + spatially-aware model is the conservative default.
+    default_mode = "pittsburgh_transfer_proximity"
 
     # Expose a locally-fitted Calvert model if analyze_calvert_reports.py installed one.
     if core.COEFFS_CALVERT_FITTED:
         coeffs["calvert_fitted"] = core.COEFFS_CALVERT_FITTED
         label = "Calvert City (Data-Fitted)"
-        meta = core.CALVERT_FITTED_META or {}
-        if meta.get("n_reports"):
-            label += f" — {meta['n_reports']} reports"
+        cfmeta = core.CALVERT_FITTED_META or {}
+        if cfmeta.get("n_reports"):
+            label += f" — {cfmeta['n_reports']} reports"
         mode_labels["calvert_fitted"] = label
+        mode_offset["calvert_fitted"] = OFF  # fitted on Calvert-frame inputs
         default_mode = "calvert_fitted"  # prefer the data-fitted model once it exists
 
     meta = {
@@ -201,6 +233,8 @@ def build_meta():
         "default_mode": default_mode,
         "coeffs": coeffs,
         "mode_labels": mode_labels,
+        "mode_offset": mode_offset,
+        "odor_sources": core.ODOR_SOURCES,
         "fitted_meta": core.CALVERT_FITTED_META,
         "custom_slider_ranges": custom_ranges,
         "wind_defaults": {"filter": True, "penalty_pct": 75, "boost": 1.0, "continuous_mode": True},

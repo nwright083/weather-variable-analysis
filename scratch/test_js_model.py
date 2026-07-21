@@ -51,6 +51,42 @@ class TestJsParity(unittest.TestCase):
             self.assertAlmostEqual(ori_py, ori_js, delta=0.1,
                                    msg=f"wind_dir={wind_dir} py={ori_py} js={ori_js}")
 
+    def test_parity_four_models_multisource(self):
+        """Python predict_ori and JS computeOri agree across the 2x2 of
+        {Exact, Transfer} x {weather-only, Proximity} with summed multi-source terms."""
+        lat, lon = 36.9448, -88.2930  # Tract 9503, Marshall Co.
+        base = {
+            "temperature": 82.0, "temperature_squared": 82.0 ** 2, "solar_radiation": 210.0,
+            "relative_humidity": 65.0, "wind_speed": 3.0, "precipitation": 0.0,
+            "diurnal_temperature_range": 20.0, "boundary_layer_height": 550.0,
+            "atmospheric_pressure": 1004.0,
+        }
+        OFF = core.PRESSURE_ELEVATION_OFFSET
+        models = [
+            (core.COEFFS_PITTSBURGH,           0.0,  False),  # exact_pittsburgh
+            (core.COEFFS_PITTSBURGH_PROXIMITY, 0.0,  False),  # exact_pittsburgh_proximity
+            (core.COEFFS_PITTSBURGH,           OFF,  True),   # pittsburgh_transfer
+            (core.COEFFS_PITTSBURGH_PROXIMITY, OFF,  True),   # pittsburgh_transfer_proximity
+        ]
+        for wind_dir in (10.0, 200.0, 315.0):
+            mse, msa = core.compute_multisource_terms(lat, lon, wind_dir)
+            row = dict(base, wind_direction=wind_dir, mse=mse, msa=msa)
+            cell = {
+                "temp": base["temperature"], "temp_sq": base["temperature_squared"],
+                "solar": base["solar_radiation"], "rh": base["relative_humidity"],
+                "wind_speed": base["wind_speed"], "precip": base["precipitation"],
+                "dtr": base["diurnal_temperature_range"], "blh": base["boundary_layer_height"],
+                "pressure": base["atmospheric_pressure"], "mse": mse, "msa": msa,
+            }
+            for coeffs, offset, transfer in models:
+                opts = {"pressureOffset": offset, "windFilter": False}
+                ori_py = core.predict_ori(row, coeffs, use_wind_filter=False,
+                                          apply_pressure_transfer=transfer)
+                ori_js = self._js_ori(cell, coeffs, opts)
+                self.assertAlmostEqual(
+                    ori_py, ori_js, delta=0.1,
+                    msg=f"wind_dir={wind_dir} transfer={transfer} py={ori_py} js={ori_js}")
+
 
 if __name__ == "__main__":
     unittest.main()

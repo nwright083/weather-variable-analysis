@@ -12,13 +12,17 @@
       + c.diurnal_temperature_range * cell.dtr
       + c.boundary_layer_height * cell.blh
       + c.atmospheric_pressure * (cell.pressure - pressureOffset);
-    // Optional proximity terms (pittsburgh_proximity mode).
-    // Mirrors predict_ori: exposure = exp(-0.02 * distance), wind_align = cell.wind_alignment.
-    if (c.multi_source_exposure !== undefined && cell.distance !== undefined) {
-      z += c.multi_source_exposure * Math.exp(-0.02 * cell.distance);
+    // Optional proximity terms (proximity modes). Mirrors predict_ori: prefer the
+    // precomputed multi-source aggregates (mse = summed exposure Σexp(-0.02·d_i),
+    // msa = exposure-weighted alignment); fall back to single-source Calvert if absent.
+    if (c.multi_source_exposure !== undefined) {
+      var exposure = (cell.mse !== undefined) ? cell.mse
+        : (cell.distance !== undefined ? Math.exp(-0.02 * cell.distance) : undefined);
+      if (exposure !== undefined) z += c.multi_source_exposure * exposure;
     }
-    if (c.wind_align_weighted !== undefined && cell.wind_alignment !== undefined) {
-      z += c.wind_align_weighted * cell.wind_alignment;
+    if (c.wind_align_weighted !== undefined) {
+      var wa = (cell.msa !== undefined) ? cell.msa : cell.wind_alignment;
+      if (wa !== undefined) z += c.wind_align_weighted * wa;
     }
     return z;
   }

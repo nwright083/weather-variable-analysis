@@ -40,22 +40,34 @@ def test_build_feature_payload_schema():
     # Pick the first location id to inspect
     first_id = list(payload["features"]["2026-06-24"].keys())[0]
     cell = payload["features"]["2026-06-24"][first_id]
-    for k in ["aligned","wind_alignment","distance","temp","temp_sq","solar","rh","wind_speed","wind_dir","precip","dtr","blh","pressure"]:
+    for k in ["aligned","wind_alignment","distance","mse","msa","temp","temp_sq","solar","rh","wind_speed","wind_dir","precip","dtr","blh","pressure"]:
         assert k in cell, f"missing {k}"
     assert isinstance(cell["aligned"], bool)
     assert isinstance(cell["wind_alignment"], float), "Expected wind_alignment float in cell"
     assert 0.0 <= cell["wind_alignment"] <= 1.0, f"wind_alignment out of range: {cell['wind_alignment']}"
+    # Multi-source aggregates: exposure sums over >=1 source (>0), alignment is 0..1
+    assert cell["mse"] > 0.0, f"mse should be positive exposure sum: {cell['mse']}"
+    assert 0.0 <= cell["msa"] <= 1.0, f"msa out of range: {cell['msa']}"
 
 
 def test_build_meta_has_coeffs_and_offset():
     meta = generate_site.build_meta()
     assert meta["pressure_offset"] == generate_site.core.PRESSURE_ELEVATION_OFFSET
-    assert "estimated_calvert" in meta["coeffs"]
-    assert "exact_pittsburgh" in meta["coeffs"]
+    expected = {"exact_pittsburgh", "exact_pittsburgh_proximity",
+                "pittsburgh_transfer", "pittsburgh_transfer_proximity"}
+    assert expected <= set(meta["coeffs"])
+    assert expected <= set(meta["mode_labels"])
+    assert meta["default_mode"] == "pittsburgh_transfer_proximity"
+    # Exact and Transfer twins share coefficient values; the offset is what differs.
     assert meta["coeffs"]["exact_pittsburgh"]["const"] == generate_site.core.COEFFS_PITTSBURGH["const"]
-    assert {"estimated_calvert", "exact_pittsburgh", "pittsburgh_proximity"} <= set(meta["mode_labels"])
-    assert "pittsburgh_proximity" in meta["coeffs"]
-    assert meta["coeffs"]["pittsburgh_proximity"]["multi_source_exposure"] == generate_site.core.COEFFS_PITTSBURGH_PROXIMITY["multi_source_exposure"]
+    assert meta["coeffs"]["pittsburgh_transfer"]["const"] == generate_site.core.COEFFS_PITTSBURGH["const"]
+    assert meta["coeffs"]["pittsburgh_transfer_proximity"]["multi_source_exposure"] == generate_site.core.COEFFS_PITTSBURGH_PROXIMITY["multi_source_exposure"]
+    # mode_offset gates the pressure transfer: Exact = 0, Transfer = elevation offset.
+    OFF = generate_site.core.PRESSURE_ELEVATION_OFFSET
+    assert meta["mode_offset"]["exact_pittsburgh"] == 0.0
+    assert meta["mode_offset"]["exact_pittsburgh_proximity"] == 0.0
+    assert meta["mode_offset"]["pittsburgh_transfer"] == OFF
+    assert meta["mode_offset"]["pittsburgh_transfer_proximity"] == OFF
 
 
 def test_build_meta_model_metrics():
@@ -68,7 +80,9 @@ def test_build_meta_model_metrics():
     mm = meta.get("model_metrics")
     assert mm is not None, "model_metrics missing from meta despite model_metrics.json existing"
     assert "models" in mm
-    for model_key in ("exact_pittsburgh", "pittsburgh_proximity", "estimated_calvert"):
+    # Metrics are keyed by coefficient family (weather-only vs proximity); the
+    # Exact/Transfer split does not change discrimination, so it adds no metric rows.
+    for model_key in ("exact_pittsburgh", "pittsburgh_proximity"):
         assert model_key in mm["models"], f"missing model key: {model_key}"
         m = mm["models"][model_key]
         assert "fpr" in m and "tpr" in m and "auc" in m, f"{model_key} missing curve arrays"
