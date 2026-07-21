@@ -45,8 +45,8 @@ def test_build_feature_payload_schema():
     assert isinstance(cell["aligned"], bool)
     assert isinstance(cell["wind_alignment"], float), "Expected wind_alignment float in cell"
     assert 0.0 <= cell["wind_alignment"] <= 1.0, f"wind_alignment out of range: {cell['wind_alignment']}"
-    # Multi-source aggregates: exposure sums over >=1 source (>0), alignment is 0..1
-    assert cell["mse"] > 0.0, f"mse should be positive exposure sum: {cell['mse']}"
+    # Multi-source aggregates: nearest-source exposure in (0,1], alignment is 0..1
+    assert 0.0 < cell["mse"] <= 1.0, f"mse (nearest-source exposure) out of range: {cell['mse']}"
     assert 0.0 <= cell["msa"] <= 1.0, f"msa out of range: {cell['msa']}"
 
 

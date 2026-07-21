@@ -7,7 +7,7 @@
 
 1. Make the **Proximity-Enhanced** model the deployed default (conservative, most discriminating), keeping all models one click away.
 2. Expose the Pittsburgh→Calvert **pressure/elevation transfer offset** as an explicit modeling axis instead of a hidden always-on transform, so "Exact" is honestly exact.
-3. Add a **second odor source** (TVA Shawnee Fossil Plant) and generalize the proximity model from single-source to **summed multi-source** exposure.
+3. Add a **second odor source** (TVA Shawnee Fossil Plant) and generalize the proximity model from single-source to **nearest-source multi-source** exposure. (Originally implemented as *summed* exposure; revised to nearest-source after the sum was found to inflate risk map-wide by double-counting — see Update below.)
 
 ## Model set — a 2×2 (all four selectable)
 
@@ -37,8 +37,18 @@ ODOR_SOURCES = [
 
 Per tract per day, `generate_site.py` precomputes two scalar aggregates and stores them in the JSON payload so `docs/model.js` stays a thin consumer and Python↔JS parity holds:
 
-- **Exposure** `E = Σ_i exp(-0.02 · d_i)` over sources (miles; k=0.02 unchanged).
-- **Wind alignment** `A = Σ_i [exp(-0.02 · d_i) · align_i] / Σ_i exp(-0.02 · d_i)` — exposure-weighted mean of per-source continuous alignment, so the wind term reflects whichever sources dominate exposure.
+- **Exposure** `E = max_i exp(-0.02 · d_i)` — the nearest source (miles; k=0.02). Stays in [0,1], the scale the coefficient was calibrated on.
+- **Wind alignment** `A = align` for that same nearest source.
+
+> **Update (2026-07-21, revised):** originally shipped as *summed* exposure
+> `E = Σ_i exp(-0.02·d_i)` with exposure-weighted alignment. Empirically this
+> inflated the whole risk map — every tract gained the second source's exposure even
+> when far from it (e.g. a Calvert-adjacent tract 26 mi from Shawnee jumped 10.6%→25.1%),
+> pushing the proximity models above the weather-only models, the opposite of the
+> intended conservative behavior. Switched to **nearest-source (max)**: a tract's risk
+> is driven by whichever emitter it is closest to, decaying with distance — the
+> validated single-source behavior, generalized. Adding Shawnee now only raises
+> exposure where Shawnee is the closest source (near Paducah).
 
 `predict_ori` consumes `E` via `multi_source_exposure` coeff and `A` via `wind_align_weighted` coeff (coefficients +1.727589 / +1.377858 reused as-is). Summation moves Calvert's exposure scale closer to the multi-emitter Pittsburgh training construction — more faithful, not less.
 

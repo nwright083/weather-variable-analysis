@@ -91,9 +91,9 @@ def build_feature_payload(df, dates_sorted):
             else:
                 alignment = 0.5
 
-            # Multi-source proximity aggregates (summed exposure + exposure-weighted
-            # alignment) for the proximity models; single-source Calvert fields above
-            # are retained for display, the wind filter, and the hourly tab.
+            # Multi-source proximity aggregates (nearest-source exposure + that
+            # source's alignment) for the proximity models; single-source Calvert
+            # fields above are retained for display, the wind filter, and the hourly tab.
             lat, lon = _COORDS_BY_ID.get(loc_id, (core.IND_LAT, core.IND_LON))
             mse, msa = core.compute_multisource_terms(lat, lon, float(row["wind_direction"]))
 

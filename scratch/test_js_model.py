@@ -53,7 +53,7 @@ class TestJsParity(unittest.TestCase):
 
     def test_parity_four_models_multisource(self):
         """Python predict_ori and JS computeOri agree across the 2x2 of
-        {Exact, Transfer} x {weather-only, Proximity} with summed multi-source terms."""
+        {Exact, Transfer} x {weather-only, Proximity} with nearest-source terms."""
         lat, lon = 36.9448, -88.2930  # Tract 9503, Marshall Co.
         base = {
             "temperature": 82.0, "temperature_squared": 82.0 ** 2, "solar_radiation": 210.0,

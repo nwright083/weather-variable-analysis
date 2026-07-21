@@ -13,8 +13,8 @@
       + c.boundary_layer_height * cell.blh
       + c.atmospheric_pressure * (cell.pressure - pressureOffset);
     // Optional proximity terms (proximity modes). Mirrors predict_ori: prefer the
-    // precomputed multi-source aggregates (mse = summed exposure Σexp(-0.02·d_i),
-    // msa = exposure-weighted alignment); fall back to single-source Calvert if absent.
+    // precomputed multi-source aggregates (mse = nearest-source exposure max exp(-0.02·d_i),
+    // msa = that source's alignment); fall back to single-source Calvert if absent.
     if (c.multi_source_exposure !== undefined) {
       var exposure = (cell.mse !== undefined) ? cell.mse
         : (cell.distance !== undefined ? Math.exp(-0.02 * cell.distance) : undefined);

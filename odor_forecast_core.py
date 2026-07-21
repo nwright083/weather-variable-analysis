@@ -37,9 +37,11 @@ IND_LON = -88.3480
 # Odor emission sources for the proximity model. The Calvert City complex is the
 # primary cluster; the TVA Shawnee Fossil Plant (West Paducah, ~10 mi NW of Paducah)
 # is a large coal SO2 emitter — SO2 is the same odorant proxy the Pittsburgh
-# validation used. Exposure is SUMMED across sources (see compute_multisource_terms),
-# which brings Calvert's exposure scale closer to the multi-emitter Pittsburgh panel
-# the multi_source_exposure / wind_align_weighted coefficients were fit on.
+# validation used. Exposure uses the NEAREST source (see compute_multisource_terms):
+# a tract's risk is driven by whichever emitter it is closest to, decaying with
+# distance. This keeps exposure on the [0,1] scale the coefficient was calibrated on
+# (the validated single-source Calvert behavior) and adds a source's influence only
+# where that source is the closest one — it does not stack risk between sources.
 ODOR_SOURCES = [
     {"name": "Calvert City Industrial Complex", "lat": IND_LAT, "lon": IND_LON},
     {"name": "TVA Shawnee Fossil Plant",        "lat": 37.1533, "lon": -88.7739},
@@ -250,27 +252,30 @@ def _source_bearing(src_lat, src_lon, recv_lat, recv_lon):
 
 
 def compute_multisource_terms(lat, lon, wind_from_deg, sources=None, k=SOURCE_DECAY_K):
-    """Summed multi-source exposure and exposure-weighted wind alignment for a location.
+    """Nearest-source exposure and that source's wind alignment for a location.
 
-    exposure   = Σ_i exp(-k · d_i)                          (proximity term input)
-    alignment  = Σ_i [exp(-k · d_i) · align_i] / Σ_i exp(-k · d_i)   (wind term input)
+    exposure   = max_i exp(-k · d_i)      (the dominant/nearest source; stays in [0,1])
+    alignment  = align for that same nearest source
 
-    where d_i is miles to source i and align_i is the continuous 0–1 wind-alignment
-    for that source. Weighting the alignment by exposure makes the wind term reflect
-    whichever sources actually dominate the receiver's exposure.
+    where d_i is miles to source i. Using the nearest source (rather than summing
+    across all sources) keeps exposure on the [0,1] scale the multi_source_exposure
+    coefficient was calibrated on and avoids inflating risk for tracts sitting between
+    emitters: a tract's risk is driven by whichever source it is closest to, decaying
+    with distance. Adding a source raises a tract's exposure only where that source is
+    the closest one, leaving tracts nearer another source unchanged.
     """
     if sources is None:
         sources = ODOR_SOURCES
-    exp_sum = 0.0
-    weighted_align = 0.0
+    best_w = 0.0
+    best_align = 0.5
     for s in sources:
         d = _pair_distance_miles(lat, lon, s["lat"], s["lon"])
         w = math.exp(-k * d)
-        a = compute_continuous_wind_alignment(
-            wind_from_deg, _source_bearing(s["lat"], s["lon"], lat, lon))
-        exp_sum += w
-        weighted_align += w * a
-    return exp_sum, (weighted_align / exp_sum if exp_sum > 0 else 0.5)
+        if w > best_w:
+            best_w = w
+            best_align = compute_continuous_wind_alignment(
+                wind_from_deg, _source_bearing(s["lat"], s["lon"], lat, lon))
+    return best_w, best_align
 
 
 # Sector bounds derived from calvert_zips.geojson via scratch/test_sectors.py;
@@ -368,8 +373,8 @@ def predict_ori(row, coeffs, *, use_wind_filter=True, wind_penalty=0.25, wind_bo
             z -= distance_decay_rate * dist
 
     # Integrated proximity regression terms (present only in COEFFS_PITTSBURGH_PROXIMITY).
-    # Prefer the precomputed multi-source aggregates (mse = summed exposure Σexp(-k·d_i),
-    # msa = exposure-weighted alignment); fall back to single-source Calvert if absent.
+    # Prefer the precomputed multi-source aggregates (mse = nearest-source exposure
+    # max exp(-k·d_i), msa = that source's alignment); fall back to single-source Calvert.
     if 'multi_source_exposure' in coeffs:
         exposure = row.get('mse', None)
         if exposure is None:

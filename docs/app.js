@@ -588,14 +588,14 @@ var MODE_DOCS = {
     tagline: "Default. Calvert-frame corrected, and aware of where you are relative to the odor sources and the wind.",
     data: "Pittsburgh zip-day panel — ~36,600 observations (every tract × every day), 2018–2026, logistic regression.",
     how: "The most complete model: Pittsburgh coefficients with the pressure-transfer correction, plus two " +
-      "spatial terms fitted in the same regression — <b>summed source proximity</b> (exposure adds up over the " +
-      "Calvert City industrial complex <i>and</i> the TVA Shawnee Fossil Plant near Paducah, each decaying with " +
-      "distance) and <b>exposure-weighted wind alignment</b> (higher risk when the wind carries air from the " +
-      "dominant source toward you). This is why the map shows different risk for different tracts on the same day.",
+      "spatial terms fitted in the same regression — <b>nearest-source proximity</b> (risk decays with distance " +
+      "from whichever emitter you are closest to — the Calvert City industrial complex <i>or</i> the TVA Shawnee " +
+      "Fossil Plant near Paducah) and <b>wind alignment</b> to that source (higher risk when the wind carries air " +
+      "from it toward you). This is why the map shows different risk for different tracts on the same day.",
     notes: [
       "Debiased: day-of-week and holiday <i>reporting</i> habits are removed so only weather/physics drive the score.",
       "Precipitation was corrected to −0.864 (the raw panel fit had an overfitting artifact that forced rainy days to 100%).",
-      "Multi-source: summing exposure over both emitters matches how the proximity coefficient was trained (on Pittsburgh's several emitters).",
+      "Multi-source: the nearest emitter drives each tract, so adding Shawnee raises risk near Paducah without inflating tracts already close to Calvert.",
     ],
     best: "Best all-around choice and the conservative default: spatial + wind-direction aware, Calvert-frame corrected.",
   },
