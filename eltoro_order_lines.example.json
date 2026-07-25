@@ -1,9 +1,0 @@
-{
-  "_comment": "Template for eltoro_order_lines.json (the real file is git-ignored). Produced at setup: create the campaign + one order line per target tract IN THE EL TORO PORTAL, with fixed budgets, then record their ids here. The daily automation ONLY toggles order lines listed here; any tract not present is never touched. Keys under 'order_lines' are census-tract GEOIDs; values are El Toro order-line ids.",
-  "org_id": "REPLACE_WITH_ORG_ID",
-  "campaign_id": "REPLACE_WITH_CAMPAIGN_ID",
-  "order_lines": {
-    "21157950101": "REPLACE_WITH_ORDER_LINE_ID",
-    "21157950102": "REPLACE_WITH_ORDER_LINE_ID"
-  }
-}

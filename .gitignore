@@ -23,15 +23,9 @@ Odor_Complaint_Analysis_Walkthrough.md
 # Generated forecast data (produced by generate_site.py / CI)
 docs/data/
 
-# Ad trigger runtime state (produced by ad_trigger.py)
-ad_state.json
-ad_decisions.log
-
-# El Toro secrets & pre-provisioned order-line mapping — NEVER commit these.
-# Templates (.env.example, eltoro_order_lines.example.json) ARE committed.
+# Environment files
 .env
 .env.local
-eltoro_order_lines.json
 
 # Large training-data CSVs — stored in Gitea only (too large for GitHub LFS quota).
 # Re-generate: run fetch_weather_for_zips_pittsburgh.py + merge_smell_weather_pittsburgh.py
