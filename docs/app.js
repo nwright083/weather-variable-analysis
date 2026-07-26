@@ -476,35 +476,6 @@ function renderMonthly() {
 
 // ── Report tab ────────────────────────────────────────────────────────────────
 
-function localTimestampStr() {
-  var d = new Date();
-  var pad = function(n) { return n < 10 ? '0' + n : String(n); };
-  var off = -d.getTimezoneOffset();
-  var sign = off >= 0 ? '+' : '-';
-  var absOff = Math.abs(off);
-  return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) +
-    'T' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()) +
-    sign + pad(Math.floor(absOff / 60)) + ':' + pad(absOff % 60);
-}
-
-function buildFormUrl(lat, lon) {
-  var cfg = window.GOOGLE_FORM;
-  var u = new URL(cfg.viewUrl);
-  if (lat != null && lon != null) {
-    u.searchParams.set(cfg.latEntry, lat.toFixed(6));
-    u.searchParams.set(cfg.lonEntry, lon.toFixed(6));
-  }
-  if (cfg.tsEntry) {
-    // Local time with UTC offset embedded — e.g. 2026-06-25T09:30:00-05:00
-    u.searchParams.set(cfg.tsEntry, localTimestampStr());
-  }
-  if (cfg.tzEntry) {
-    // Optional: pre-fill the Timezone field with the IANA name (e.g. "America/Chicago")
-    u.searchParams.set(cfg.tzEntry, Intl.DateTimeFormat().resolvedOptions().timeZone);
-  }
-  return u.toString();
-}
-
 function renderReportTab() {
   var panel = document.getElementById("tab-report");
   if (panel.dataset.built) return;
@@ -512,35 +483,11 @@ function renderReportTab() {
   panel.innerHTML =
     '<div class="clean-card" style="text-align:left;max-width:560px;">' +
     '<h3 style="margin:0 0 0.5rem;">Report an Odor</h3>' +
+    '<p style="font-size:0.88rem;color:#475569;margin:0 0 0.9rem;">Notice an odor? Report it through the Smell My City app — community reports build the local odor record that powers this forecast.</p>' +
     '<div style="display:flex;flex-direction:column;gap:0.6rem;">' +
-    '  <a href="https://smellmycity.org/" target="_blank" rel="noopener" class="report-btn report-btn-link">📱 Download Smell My City (Recommended)</a>' +
-    '  <div style="font-size:0.75rem;color:#94a3b8;text-align:center;letter-spacing:0.02em;">— or submit via Google Form —</div>' +
-    '  <button id="btn-geo" class="report-btn">📍 Use My Exact Location (Google Form)</button>' +
-    '  <button id="btn-geo-skew" class="report-btn">🛡️ Use Approximate Location (Google Form)</button>' +
+    '  <a href="https://smellmycity.org/" target="_blank" rel="noopener" class="report-btn report-btn-link">📱 Report on Smell My City</a>' +
     '</div>' +
-    '<div id="geo-status" style="font-size:0.78rem;color:#64748b;margin-top:0.7rem;min-height:1.2em;"></div>' +
     '</div>';
-
-  function openForm(skew) {
-    var statusEl = panel.querySelector("#geo-status");
-    if (!navigator.geolocation) { statusEl.textContent = "Geolocation not supported by this browser."; return; }
-    statusEl.textContent = "Getting your location…";
-    navigator.geolocation.getCurrentPosition(function (pos) {
-      var lat = pos.coords.latitude, lon = pos.coords.longitude;
-      if (skew) {
-        // ±100–500 ft per axis (0.0003–0.0014 deg ≈ 110–510 ft at this latitude)
-        lat += (Math.random() < 0.5 ? 1 : -1) * (0.0003 + Math.random() * 0.0011);
-        lon += (Math.random() < 0.5 ? 1 : -1) * (0.0003 + Math.random() * 0.0011);
-      }
-      statusEl.textContent = (skew ? "Approximate" : "Exact") + " location captured — opening form…";
-      window.open(buildFormUrl(lat, lon), "_blank", "noopener");
-    }, function (err) {
-      statusEl.textContent = "Could not get location: " + err.message;
-    }, {enableHighAccuracy: true, timeout: 10000});
-  }
-
-  panel.querySelector("#btn-geo").addEventListener("click", function () { openForm(false); });
-  panel.querySelector("#btn-geo-skew").addEventListener("click", function () { openForm(true); });
 }
 
 // ── Methodology tab ───────────────────────────────────────────────────────────
