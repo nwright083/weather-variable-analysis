@@ -574,7 +574,7 @@ function renderMethodsTab() {
   if (meta.model_metrics && meta.model_metrics.models) {
     var mm = meta.model_metrics.models;
     Object.keys(meta.mode_labels || {}).forEach(function(id) {
-      var m = mm[id];
+      var m = mm[id] || mm[metricFamily(id)];  // metrics are keyed by coefficient family
       if (!m) return;
       // Prefer daily-level threshold (avoids zip-day granularity artifact)
       var rawThr = (m.thr_opt_daily != null) ? m.thr_opt_daily : m.thr_opt;
@@ -592,10 +592,10 @@ function renderMethodsTab() {
       '<th>Model</th><th>Alert threshold (ORI)</th><th>F1 at threshold</th></tr></thead>' +
       '<tbody>' + thrRows + '</tbody></table>' +
       '<p style="font-size:0.78rem;color:#64748b;margin-top:0.3rem;margin-bottom:0;">' +
-      'The <b>Exact Pittsburgh threshold (36.8%)</b> was derived from the daily city-wide analysis in the Pittsburgh notebook — one row per date, city-level WOB binarized vs its mean. ' +
-      'This is the correct granularity because the model has no spatial terms (every tract gets the same ORI on a given day). ' +
+      'Thresholds are set by <b>coefficient family</b>, so the two weather-only models (Exact Pittsburgh and Pittsburgh Transfer) share one and the two proximity models share another — the Exact/Transfer pressure offset is a uniform shift that does not change the optimal threshold. ' +
+      'The <b>weather-only threshold (36.8%)</b> comes from the daily city-wide analysis in the Pittsburgh notebook (one row per date, city-level WOB binarized vs its mean) — the correct granularity for a spatially-flat model where every tract gets the same ORI on a given day. ' +
       'The raw zip-day F1-optimal threshold (6.97%) is an artifact of evaluating a spatially-flat model against spatially-varying zip labels and is not used for alerts. ' +
-      'The <b>Pittsburgh Proximity threshold (20.4%)</b> is from the zip-day panel, which is appropriate because proximity scores genuinely differ per tract and the alert fires per selected tract. ' +
+      'The <b>proximity threshold (20.4%)</b> is from the zip-day panel, appropriate because proximity scores genuinely differ per tract and the alert fires per selected tract. ' +
       'These thresholds update automatically when a locally-fitted Calvert model is installed.</p>'
     : '';
   html +=
@@ -606,13 +606,17 @@ function renderMethodsTab() {
     '<ul>' +
     '<li><b>Atmospheric trapping conditions</b> — temperature inversions, boundary-layer height, wind speed, ' +
     'humidity, and related variables that determine whether odors stay concentrated near the ground.</li>' +
-    '<li><b>Wind direction and proximity to odor sources</b> — in the Pittsburgh Proximity-Enhanced model, ' +
-    'risk is further weighted by how directly the wind blows toward each census tract from industrial emitters, ' +
-    'and by how far that tract is from those sources. Pittsburgh data showed a high correlation between ' +
-    'upwind distance to industrial sites and the volume of community odor reports.</li>' +
+    '<li><b>Wind direction and proximity to odor sources</b> — the <b>Proximity</b> models add two spatial terms: ' +
+    'how directly the wind carries air from the nearest emitter toward each census tract, and how far that tract is ' +
+    'from that source (risk decays with distance). Calvert is modeled with two sources — the Calvert City industrial ' +
+    'complex and the TVA Shawnee Fossil Plant near Paducah — and each tract is driven by whichever is closest. ' +
+    'Pittsburgh data showed a strong relationship between upwind proximity to industrial sites and the volume of ' +
+    'community odor reports.</li>' +
     '</ul>' +
     '<p style="margin-bottom:0;">It predicts when the <b>atmosphere will trap and concentrate</b> odor near the ground — ' +
-    'not whether the source is actively emitting. Risk tiers:</p>' +
+    'not whether the source is actively emitting. The tool offers <b>four models</b> (detailed below) that differ on two ' +
+    'independent choices: whether they add the proximity terms above, and whether they apply the Pittsburgh→Calvert ' +
+    'pressure correction (Exact vs Transfer). Risk tiers:</p>' +
     '<div class="tier-row">' +
     '<span class="badge-pill badge-clear">Clear / Low &lt; 15%</span>' +
     '<span class="badge-pill badge-moderate">Moderate 15–30%</span>' +
@@ -637,10 +641,13 @@ function renderMethodsTab() {
     '<li><b>Wind speed</b> — stronger wind disperses odor and lowers risk.</li>' +
     '<li><b>Temperature</b> (with a quadratic term, °F²) <b>, humidity, solar radiation, pressure, precipitation</b> — secondary modifiers. The quadratic captures the non-linear curve: risk rises steeply outside a mid-range temperature window.</li>' +
     '</ul>' +
-    '<p style="margin-bottom:0;font-size:0.85rem;color:#64748b;">Two corrections apply to every model: an ' +
-    '<b>elevation pressure offset</b> (Pittsburgh sits ~250 m higher than Calvert, so pressures are shifted into the ' +
-    'training frame), and <b>de-biasing</b> (day-of-week and holiday <i>reporting</i> patterns are stripped out so the ' +
-    'score reflects weather, not when people happen to file reports).</p>' +
+    '<p style="margin-bottom:0;font-size:0.85rem;color:#64748b;"><b>De-biasing</b> is baked into every model ' +
+    '(day-of-week and holiday <i>reporting</i> patterns are stripped out so the score reflects weather, not when ' +
+    'people happen to file reports). The <b>elevation pressure offset</b> (Pittsburgh sits ~250 m higher than ' +
+    'Calvert, so pressures are shifted into the training frame) is applied only by the <b>Transfer</b> models — ' +
+    'it is what distinguishes them from the Exact models (see the model descriptions below). It is a small, uniform ' +
+    'shift, and the corrected driver analysis finds pressure itself is not a robust predictor, so the two ' +
+    'weather-only models score almost identically.</p>' +
     '</div>';
 
   // ── Formula card ────────────────────────────────────────────────────────────
