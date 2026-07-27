@@ -133,6 +133,11 @@ COEFFS_EST_CALVERT = {
 # is physically correct. This is SAFE: precip is 0 on most days, so dry-day baseline calibration
 # (the jointly-fit intercept) is untouched; only rainy-day behavior changes. Raw value preserved
 # in the notebooks / model_coeffs_pittsburgh.json.
+#   NOT arbitrary and NOT removable: a controlled re-fit of the city-wide daily model
+#   (burden-above-mean target) reproduces this value to within rounding (raw fit ≈ -0.96),
+#   so the override simply substitutes the panel's overfit artifact with the model's own
+#   validated coefficient. Deleting it would reinstate the +6.25 artifact and re-break rainy
+#   days. The same substitution is applied to every proximity model (incl. the pooled one).
 _PROX_PRECIP_RAW = 6.252656147133751  # raw zip-day panel fit (kept for reference, NOT used)
 COEFFS_PITTSBURGH_PROXIMITY = {
     'const': -16.225190,
@@ -147,6 +152,45 @@ COEFFS_PITTSBURGH_PROXIMITY = {
     'atmospheric_pressure': 0.008638,
     'multi_source_exposure': 1.727589,
     'wind_align_weighted': 1.377858,
+}
+
+# POOLED (Pittsburgh + Louisville) proximity-enhanced coefficients.
+# Fit on both cities' zip-day panels stacked together via the exact same pipeline as
+# COEFFS_PITTSBURGH_PROXIMITY (burden-above-mean event, precip summed daily, dow/holiday
+# de-biasing, summed multi-source exposure), with a Louisville city dummy absorbing the
+# base-rate difference (dropped at deployment, so `const` stays in the Pittsburgh frame).
+# Precipitation carries the same validated city-wide override (raw pooled fit +5.83, overfit).
+#
+# EQUAL-CITY WEIGHTING: Pittsburgh has 44,494 obs vs Louisville's 5,717 (~89% / 11%), so an
+# unweighted pool is dominated ~8:1 by Pittsburgh — barely a "two-city" model. We instead
+# weight each city to equal total influence (freq_weights = 1 for Pittsburgh, n_pgh/n_lou for
+# Louisville). This is a one-line weighting choice, not extra model structure, and it is
+# strictly better: Louisville AUC 0.873 -> 0.903 (near its native ceiling) while Pittsburgh is
+# unharmed (0.906 -> 0.909). The two cities' standardized weather coefficients already agree at
+# r=+0.93 (trapping physics is city-independent), so balancing extracts the shared physical
+# signal rather than Pittsburgh's data volume.
+#
+# Behaviour vs the current default: reads a few points LOWER on trapping days (more
+# conservative — desirable for paid ad triggering) and correctly stays near zero on windy and
+# rainy days. wind_speed shrinks toward 0 here, but windy days are still suppressed via the
+# correlated channels (high boundary-layer height, low diurnal range, poor wind alignment), so
+# the model stays physically sensible. NOTE: its absolute probabilities run lower than the
+# Pittsburgh-only proximity model, so the alert threshold must be re-derived before this is
+# used as the ad trigger. Deployed as the "Pooled Transfer + Proximity" mode; a candidate,
+# not yet the default.
+COEFFS_POOLED_PROXIMITY = {
+    'const': -15.111598,
+    'temperature': 0.012434,
+    'temperature_squared': -0.000090,
+    'solar_radiation': -0.001313,
+    'relative_humidity': -0.005064,
+    'wind_speed': -0.002932,
+    'precipitation': -0.908541,  # city-wide override (raw pooled fit +5.833; see note above)
+    'diurnal_temperature_range': 0.304080,
+    'boundary_layer_height': -0.000027,
+    'atmospheric_pressure': 0.005226,
+    'multi_source_exposure': 2.518195,
+    'wind_align_weighted': 1.146644,
 }
 
 # Calvert City Proximity-Enhanced: Calvert terrain-adjusted weather coefficients

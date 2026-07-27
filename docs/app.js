@@ -4,6 +4,7 @@
 // Map a model mode to its metrics coefficient family. Exact/Transfer twins share a
 // family (the pressure offset is a uniform shift that does not change AUC/thresholds).
 function metricFamily(mode) {
+  if (String(mode).indexOf("pooled") !== -1) return "pooled_proximity";
   if (String(mode).indexOf("proximity") !== -1) return "pittsburgh_proximity";
   if (String(mode).indexOf("calvert_fitted") !== -1) return "calvert_fitted";
   return "exact_pittsburgh";
@@ -541,10 +542,25 @@ var MODE_DOCS = {
       "from it toward you). This is why the map shows different risk for different tracts on the same day.",
     notes: [
       "Debiased: day-of-week and holiday <i>reporting</i> habits are removed so only weather/physics drive the score.",
-      "Precipitation was corrected to −0.864 (the raw panel fit had an overfitting artifact that forced rainy days to 100%).",
+      "Precipitation was corrected to −0.909 (the raw panel fit had an overfitting artifact that forced rainy days to 100%); a controlled city-wide re-fit reproduces this value, so it is the model's own validated coefficient, not a hand-set constant.",
       "Multi-source: the nearest emitter drives each tract, so adding Shawnee raises risk near Paducah without inflating tracts already close to Calvert.",
     ],
     best: "Best all-around choice and the conservative default: spatial + wind-direction aware, Calvert-frame corrected.",
+  },
+  pooled_transfer_proximity: {
+    tagline: "Two-city physics: Pittsburgh + Louisville pooled, then transferred into Calvert's frame with location + wind awareness.",
+    data: "Pittsburgh (~44,500 obs) and Louisville (~5,700 obs) zip-day panels stacked together, one logistic regression, with a city term absorbing the base-rate difference.",
+    how: "Same recipe as the default, but the weather + proximity coefficients are fit on <b>both</b> cities at once, " +
+      "weighting each city equally so Pittsburgh's larger report volume (~89% of the data) doesn't drown out Louisville. " +
+      "Pooling keeps the trapping signal the two cities agree on (their standardized coefficients correlate at r=0.93) " +
+      "and averages out single-city quirks — a more robust basis for a third city that has no local reports of its own. " +
+      "Deployed in Calvert's frame (pressure-transfer on) with the same nearest-source proximity and wind-alignment terms.",
+    notes: [
+      "Equal-city weighting lifts Louisville accuracy to AUC 0.903 (from 0.873) while Pittsburgh is unharmed (0.909) — the physics generalizes.",
+      "Reads a few points <i>lower</i> on trapping days than the default (more conservative); windy and rainy days still correctly read near-zero.",
+      "Precipitation carries the same validated −0.909 correction; day-of-week/holiday de-biasing is kept (universal reporting cycles).",
+    ],
+    best: "A more city-independent, slightly more conservative trapping model for Calvert; candidate to become the default once vetted on the live map.",
   },
   calvert_fitted: {
     tagline: "Fitted directly from real Calvert City odor reports.",
