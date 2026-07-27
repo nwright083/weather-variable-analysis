@@ -528,12 +528,12 @@ var MODE_DOCS = {
       "proximity terms — every tract gets the same regional trapping score on a given day.",
     notes: [
       "The pressure offset is a small, uniform baseline shift, not a re-fit.",
-      "The non-spatial companion to the default model.",
+      "The non-spatial companion to the Pittsburgh proximity model.",
     ],
     best: "A clean regional trapping signal, Calvert-frame corrected.",
   },
   pittsburgh_transfer_proximity: {
-    tagline: "Default. Calvert-frame corrected, and aware of where you are relative to the odor sources and the wind.",
+    tagline: "Pittsburgh-only proximity model, Calvert-frame corrected and aware of where you are relative to the odor sources and the wind. (Superseded as default by the pooled two-city model.)",
     data: "Pittsburgh zip-day panel — ~36,600 observations (every tract × every day), 2018–2026, logistic regression.",
     how: "The most complete model: Pittsburgh coefficients with the pressure-transfer correction, plus two " +
       "spatial terms fitted in the same regression — <b>nearest-source proximity</b> (risk decays with distance " +
@@ -545,10 +545,10 @@ var MODE_DOCS = {
       "Precipitation was corrected to −0.909 (the raw panel fit had an overfitting artifact that forced rainy days to 100%); a controlled city-wide re-fit reproduces this value, so it is the model's own validated coefficient, not a hand-set constant.",
       "Multi-source: the nearest emitter drives each tract, so adding Shawnee raises risk near Paducah without inflating tracts already close to Calvert.",
     ],
-    best: "Best all-around choice and the conservative default: spatial + wind-direction aware, Calvert-frame corrected.",
+    best: "The single-city spatial model: spatial + wind-direction aware, Calvert-frame corrected. Kept as a reference alongside the pooled default.",
   },
   pooled_transfer_proximity: {
-    tagline: "Two-city physics: Pittsburgh + Louisville pooled, then transferred into Calvert's frame with location + wind awareness.",
+    tagline: "Default. Two-city physics: Pittsburgh + Louisville pooled, then transferred into Calvert's frame with location + wind awareness.",
     data: "Pittsburgh (~44,500 obs) and Louisville (~5,700 obs) zip-day panels stacked together, one logistic regression, with a city term absorbing the base-rate difference.",
     how: "Same recipe as the default, but the weather + proximity coefficients are fit on <b>both</b> cities at once, " +
       "weighting each city equally so Pittsburgh's larger report volume (~89% of the data) doesn't drown out Louisville. " +
@@ -560,7 +560,7 @@ var MODE_DOCS = {
       "Reads a few points <i>lower</i> on trapping days than the default (more conservative); windy and rainy days still correctly read near-zero.",
       "Precipitation carries the same validated −0.909 correction; day-of-week/holiday de-biasing is kept (universal reporting cycles).",
     ],
-    best: "A more city-independent, slightly more conservative trapping model for Calvert; candidate to become the default once vetted on the live map.",
+    best: "The default: a more city-independent, slightly more conservative trapping model for Calvert, validated not-overfit (in-sample vs 5-fold cross-validated AUC gap under 0.4 points).",
   },
   calvert_fitted: {
     tagline: "Fitted directly from real Calvert City odor reports.",
@@ -608,10 +608,11 @@ function renderMethodsTab() {
       '<th>Model</th><th>Alert threshold (ORI)</th><th>F1 at threshold</th></tr></thead>' +
       '<tbody>' + thrRows + '</tbody></table>' +
       '<p style="font-size:0.78rem;color:#64748b;margin-top:0.3rem;margin-bottom:0;">' +
-      'Thresholds are set by <b>coefficient family</b>, so the two weather-only models (Exact Pittsburgh and Pittsburgh Transfer) share one and the two proximity models share another — the Exact/Transfer pressure offset is a uniform shift that does not change the optimal threshold. ' +
+      'Thresholds are set by <b>coefficient family</b>, so the two weather-only models (Exact Pittsburgh and Pittsburgh Transfer) share one and the two Pittsburgh proximity models share another — the Exact/Transfer pressure offset is a uniform shift that does not change the optimal threshold. ' +
       'The <b>weather-only threshold (36.8%)</b> comes from the daily city-wide analysis in the Pittsburgh notebook (one row per date, city-level WOB binarized vs its mean) — the correct granularity for a spatially-flat model where every tract gets the same ORI on a given day. ' +
       'The raw zip-day F1-optimal threshold (6.97%) is an artifact of evaluating a spatially-flat model against spatially-varying zip labels and is not used for alerts. ' +
-      'The <b>proximity threshold (20.4%)</b> is from the zip-day panel, appropriate because proximity scores genuinely differ per tract and the alert fires per selected tract. ' +
+      'The <b>Pittsburgh proximity threshold (20.4%)</b> is from the zip-day panel, appropriate because proximity scores genuinely differ per tract and the alert fires per selected tract. ' +
+      'The <b>pooled two-city threshold (12.0%)</b> is lower because the pooled Pittsburgh+Louisville model reads lower absolute probabilities; it is derived the same way on the pooled panel, so it fires at the same calibrated rate rather than under-firing. ' +
       'These thresholds update automatically when a locally-fitted Calvert model is installed.</p>'
     : '';
   html +=
@@ -630,9 +631,10 @@ function renderMethodsTab() {
     'community odor reports.</li>' +
     '</ul>' +
     '<p style="margin-bottom:0;">It predicts when the <b>atmosphere will trap and concentrate</b> odor near the ground — ' +
-    'not whether the source is actively emitting. The tool offers <b>four models</b> (detailed below) that differ on two ' +
-    'independent choices: whether they add the proximity terms above, and whether they apply the Pittsburgh→Calvert ' +
-    'pressure correction (Exact vs Transfer). Risk tiers:</p>' +
+    'not whether the source is actively emitting. The tool offers <b>five models</b> (detailed below): a 2×2 of ' +
+    '{Exact, Transfer} × {weather-only, Proximity} that differ on whether they add the proximity terms above and whether ' +
+    'they apply the Pittsburgh→Calvert pressure correction, plus a <b>pooled two-city (Pittsburgh + Louisville) proximity ' +
+    'model — the current default</b>, which learns the trapping physics both cities share. Risk tiers:</p>' +
     '<div class="tier-row">' +
     '<span class="badge-pill badge-clear">Clear / Low &lt; 15%</span>' +
     '<span class="badge-pill badge-moderate">Moderate 15–30%</span>' +
