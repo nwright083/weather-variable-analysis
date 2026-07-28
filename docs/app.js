@@ -10,11 +10,34 @@ function metricFamily(mode) {
   return "exact_pittsburgh";
 }
 
+// Build the risk-tier legend pills from the active model's alert-anchored bands, so the
+// legend always matches the colors on the map/cards for the selected model.
+function tierLegendHtml(firstLabel, withPct) {
+  var b = APP.tierBoundsFor(APP.alertThreshold());
+  var s = withPct ? "%" : "";
+  var r = function (x) { return Math.round(x); };
+  return '<span class="badge-pill badge-clear">' + firstLabel + " &lt; " + r(b[0]) + s + "</span>" +
+    '<span class="badge-pill badge-moderate">Moderate ' + r(b[0]) + "–" + r(b[1]) + s + "</span>" +
+    '<span class="badge-pill badge-elevated">Elevated ' + r(b[1]) + "–" + r(b[2]) + s + "</span>" +
+    '<span class="badge-pill badge-high">High ≥ ' + r(b[2]) + s + "</span>";
+}
+
 const APP = {
   meta: null, forecast: null, historical: null, hourly: null,
   _callbacks: [],
   onChange(cb) { this._callbacks.push(cb); },
-  _fire() { this._callbacks.forEach(function (cb) { cb(); }); },
+  _fire() { this.syncTierBounds(); this._callbacks.forEach(function (cb) { cb(); }); },
+  // Color tiers are anchored to the active model's alert threshold T so a day at/above the
+  // alert line is never painted "Clear": Moderate at T, Elevated at ~2T, High at ~3T (capped
+  // so bands stay sane for the higher-threshold weather-only models). Keeps the colors
+  // meaningful for each model's own probability scale instead of a fixed 15/30/50.
+  tierBoundsFor(T) {
+    var t1 = T, t2 = Math.min(2 * T, 70), t3 = Math.min(3 * T, 90);
+    if (t2 <= t1 + 3) t2 = t1 + 3;
+    if (t3 <= t2 + 3) t3 = t2 + 3;
+    return [t1, t2, t3];
+  },
+  syncTierBounds() { OdorModel.setTierBounds(this.tierBoundsFor(this.alertThreshold())); },
   mode() { return document.getElementById("mode-select").value; },
   activeCoeffs() {
     if (this.mode() === "custom") return this._customCoeffs();
@@ -634,12 +657,12 @@ function renderMethodsTab() {
     'not whether the source is actively emitting. The tool offers <b>five models</b> (detailed below): a 2×2 of ' +
     '{Exact, Transfer} × {weather-only, Proximity} that differ on whether they add the proximity terms above and whether ' +
     'they apply the Pittsburgh→Calvert pressure correction, plus a <b>pooled two-city (Pittsburgh + Louisville) proximity ' +
-    'model — the current default</b>, which learns the trapping physics both cities share. Risk tiers:</p>' +
+    'model — the current default</b>, which learns the trapping physics both cities share. ' +
+    'The color tiers are <b>anchored to each model\'s alert threshold</b> — Clear stays below the alert line, ' +
+    'then Moderate, Elevated (~2×), and High (~3×) — so a flagged day is never painted green and the colors track ' +
+    'how notable a day is on that model\'s own scale (shown here for the active model):</p>' +
     '<div class="tier-row">' +
-    '<span class="badge-pill badge-clear">Clear / Low &lt; 15%</span>' +
-    '<span class="badge-pill badge-moderate">Moderate 15–30%</span>' +
-    '<span class="badge-pill badge-elevated">Elevated 30–50%</span>' +
-    '<span class="badge-pill badge-high">High ≥ 50%</span>' +
+    tierLegendHtml("Clear / Low", true) +
     '</div>' +
     (thrTable
       ? '<div style="margin-top:0.8rem;"><b style="font-size:0.9rem;">Data-derived alert thresholds (per model)</b>' + thrTable + '</div>'
@@ -1151,10 +1174,7 @@ function renderHourly() {
     : '— Daily model (constant-input), BLH &amp; temp vary';
   var legend =
     '<div class="hourly-legend">' +
-    '<span class="badge-pill badge-clear">Favorable &lt;15</span>' +
-    '<span class="badge-pill badge-moderate">Moderate 15–30</span>' +
-    '<span class="badge-pill badge-elevated">Elevated 30–50</span>' +
-    '<span class="badge-pill badge-high">High ≥50</span>' +
+    tierLegendHtml("Favorable", false) +
     '<span style="font-size:0.72rem;color:#64748b;align-self:center;margin-left:0.3rem;">' + legendSubtitle + '</span>' +
     '</div>';
 
@@ -1378,6 +1398,7 @@ async function main() {
   buildModeSelect();
   buildCustomCoeffSliders();
   wireControls();
+  APP.syncTierBounds();  // anchor color tiers to the default model's alert threshold before first render
 
   mapPanelScaffold();
   wireLocateMapButton();

@@ -51,10 +51,20 @@
     return Math.round((100 / (1 + Math.exp(-z))) * 10) / 10;
   }
 
+  // Risk-tier band edges [Clear/Moderate, Moderate/Elevated, Elevated/High], in ORI %.
+  // Anchored to the active model's alert threshold (set by app.js via setTierBounds) so a
+  // day at/above the alert line is never painted "Clear". Defaults match the legacy fixed
+  // scale until app.js syncs them to the current model.
+  var TIER_BOUNDS = [15, 30, 50];
+  function setTierBounds(b) {
+    if (b && b.length === 3 && b[0] < b[1] && b[1] < b[2]) TIER_BOUNDS = [b[0], b[1], b[2]];
+  }
+  function tierBounds() { return TIER_BOUNDS.slice(); }
+
   function getRiskTier(ori) {
-    if (ori < 15) return { label: "Clear / Low Risk", cls: "badge-clear", rgb: [22, 163, 74] };
-    if (ori < 30) return { label: "Moderate Risk", cls: "badge-moderate", rgb: [202, 138, 4] };
-    if (ori < 50) return { label: "Elevated Risk", cls: "badge-elevated", rgb: [234, 88, 12] };
+    if (ori < TIER_BOUNDS[0]) return { label: "Clear / Low Risk", cls: "badge-clear", rgb: [22, 163, 74] };
+    if (ori < TIER_BOUNDS[1]) return { label: "Moderate Risk", cls: "badge-moderate", rgb: [202, 138, 4] };
+    if (ori < TIER_BOUNDS[2]) return { label: "Elevated Risk", cls: "badge-elevated", rgb: [234, 88, 12] };
     return { label: "High Risk", cls: "badge-high", rgb: [220, 38, 38] };
   }
 
@@ -72,7 +82,8 @@
          + (hc.precipitation        || 0) * cell.precip;
   }
 
-  var api = { computeZ: computeZ, computeOri: computeOri, getRiskTier: getRiskTier, hourlyZ: hourlyZ };
+  var api = { computeZ: computeZ, computeOri: computeOri, getRiskTier: getRiskTier,
+              setTierBounds: setTierBounds, tierBounds: tierBounds, hourlyZ: hourlyZ };
   if (typeof module !== "undefined" && module.exports) { module.exports = api; }
   root.OdorModel = api;
 })(typeof window !== "undefined" ? window : globalThis);
