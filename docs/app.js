@@ -614,15 +614,12 @@ function renderMethodsTab() {
   // Shared physics
   html +=
     '<div class="method-card">' +
-    '<h2>What drives the risk (all models)</h2>' +
-    '<p>All models read the same weather inputs. The strongest physical drivers of odor trapping are:</p>' +
+    '<h2>What drives the risk</h2>' +
+    '<p>Two things move the score most, ranked by their real effect in the model:</p>' +
     '<ul>' +
-    '<li><b>Diurnal temperature range (DTR)</b> — a big day-to-night temperature swing means clear, calm nights and ' +
-    'strong overnight <b>temperature inversions</b> that trap air near the ground. The single most consistent driver.</li>' +
-    '<li><b>Boundary-layer height (BLH)</b> — how high the air mixes. A low mixing height keeps odor concentrated near ' +
-    'the surface. (DTR and BLH measure two sides of the same inversion physics.)</li>' +
-    '<li><b>Wind speed</b> — stronger wind disperses odor and lowers risk.</li>' +
-    '<li><b>Temperature</b> (with a quadratic term, °F²) <b>, humidity, solar radiation, pressure, precipitation</b> — secondary modifiers. The quadratic captures the non-linear curve: risk rises steeply outside a mid-range temperature window.</li>' +
+    '<li><b>Where you are relative to the sources</b> — <b>nearest-source proximity</b> (risk decays with distance from the closest emitter) and <b>wind alignment</b> (higher when the wind carries source air toward you). Location is the single strongest lever.</li>' +
+    '<li><b>The day\'s trapping conditions</b> — a <b>temperature window</b> (a quadratic term: risk peaks in a mid-range and falls off at the extremes), <b>solar radiation</b> and <b>humidity</b>, plus <b>diurnal temperature range</b> and <b>boundary-layer height</b> (two sides of the overnight-inversion physics that keeps air near the ground). No single weather variable dominates — they act as a cluster.</li>' +
+    '<li><b>Wind speed &amp; rain</b> — stronger wind disperses odor and rain scavenges it, both lowering risk.</li>' +
     '</ul>' +
     '<p style="margin-bottom:0;font-size:0.85rem;color:#64748b;"><b>De-biasing</b> is built in ' +
     '(day-of-week and holiday <i>reporting</i> patterns are stripped out so the score reflects weather, not when ' +
