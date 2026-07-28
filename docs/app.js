@@ -10,34 +10,19 @@ function metricFamily(mode) {
   return "exact_pittsburgh";
 }
 
-// Build the risk-tier legend pills from the active model's alert-anchored bands, so the
-// legend always matches the colors on the map/cards for the selected model.
-function tierLegendHtml(firstLabel, withPct) {
-  var b = APP.tierBoundsFor(APP.alertThreshold());
-  var s = withPct ? "%" : "";
-  var r = function (x) { return Math.round(x); };
-  return '<span class="badge-pill badge-clear">' + firstLabel + " &lt; " + r(b[0]) + s + "</span>" +
-    '<span class="badge-pill badge-moderate">Moderate ' + r(b[0]) + "–" + r(b[1]) + s + "</span>" +
-    '<span class="badge-pill badge-elevated">Elevated ' + r(b[1]) + "–" + r(b[2]) + s + "</span>" +
-    '<span class="badge-pill badge-high">High ≥ ' + r(b[2]) + s + "</span>";
+// Risk-tier legend pills on the normalized 0-100 index (alert line = 50), fixed for every model.
+function tierLegendHtml(firstLabel) {
+  return '<span class="badge-pill badge-clear">' + firstLabel + " &lt; 50</span>" +
+    '<span class="badge-pill badge-moderate">Moderate 50–70</span>' +
+    '<span class="badge-pill badge-elevated">Elevated 70–85</span>' +
+    '<span class="badge-pill badge-high">High ≥ 85</span>';
 }
 
 const APP = {
   meta: null, forecast: null, historical: null, hourly: null,
   _callbacks: [],
   onChange(cb) { this._callbacks.push(cb); },
-  _fire() { this.syncTierBounds(); this._callbacks.forEach(function (cb) { cb(); }); },
-  // Color tiers are anchored to the active model's alert threshold T so a day at/above the
-  // alert line is never painted "Clear": Moderate at T, Elevated at ~2T, High at ~3T (capped
-  // so bands stay sane for the higher-threshold weather-only models). Keeps the colors
-  // meaningful for each model's own probability scale instead of a fixed 15/30/50.
-  tierBoundsFor(T) {
-    var t1 = T, t2 = Math.min(2 * T, 70), t3 = Math.min(3 * T, 90);
-    if (t2 <= t1 + 3) t2 = t1 + 3;
-    if (t3 <= t2 + 3) t3 = t2 + 3;
-    return [t1, t2, t3];
-  },
-  syncTierBounds() { OdorModel.setTierBounds(this.tierBoundsFor(this.alertThreshold())); },
+  _fire() { this._callbacks.forEach(function (cb) { cb(); }); },
   mode() { return document.getElementById("mode-select").value; },
   activeCoeffs() {
     if (this.mode() === "custom") return this._customCoeffs();
@@ -75,6 +60,19 @@ const APP = {
     };
   },
   oriFor(cell) { return OdorModel.computeOri(cell, this.activeCoeffs(), this.opts()); },
+  // Public-facing 0-100 index (alert line = 50); the raw probability from oriFor() stays the
+  // source of truth for alert decisions and is shown in tooltips so nothing is hidden.
+  indexFor(cell) { return OdorModel.computeIndex(this.oriFor(cell), this.alertThreshold()); },
+  // Display bundle for one forecast cell: index (headline), raw probability, tier, tooltip text.
+  riskView(cell) {
+    var prob = this.oriFor(cell);
+    var idx = OdorModel.computeIndex(prob, this.alertThreshold());
+    return {
+      idx: idx, prob: prob, tier: OdorModel.getRiskTier(idx),
+      tip: prob.toFixed(1) + "% modeled chance of a reported odor event. The Odor Index (0–100) " +
+           "rescales this so the alert line sits at 50 — see the Methodology tab.",
+    };
+  },
   alertThreshold() {
     var mode = this.mode();
     var mm = this.meta && this.meta.model_metrics && this.meta.model_metrics.models;
@@ -281,7 +279,7 @@ async function buildLocSelectMap(tabKey) {
         var cell = feats[fid];
         var isSel = (fid === locId);
         if (!cell) return {color: isSel ? "#1e3a8a" : "#94a3b8", weight: isSel ? 3 : 1, fillColor: "#cbd5e1", fillOpacity: isSel ? 0.35 : 0.15};
-        var tier = OdorModel.getRiskTier(APP.oriFor(cell));
+        var tier = OdorModel.getRiskTier(APP.indexFor(cell));
         return {
           color: isSel ? "#1e3a8a" : "#475569",
           weight: isSel ? 3 : 1.2,
@@ -300,8 +298,8 @@ async function buildLocSelectMap(tabKey) {
           else renderMonthly();
         });
         var cell = feats[fid];
-        var ori = cell ? APP.oriFor(cell) : null;
-        layer.bindTooltip(dname + (ori ? "<br>ORI: " + ori.toFixed(1) + "%" : ""), {sticky: true});
+        var v = cell ? APP.riskView(cell) : null;
+        layer.bindTooltip(dname + (v ? "<br>Odor Index " + Math.round(v.idx) + " · " + v.prob.toFixed(1) + "% chance" : ""), {sticky: true});
       },
     }).addTo(m);
   }
@@ -344,38 +342,41 @@ async function buildLocSelectMap(tabKey) {
 function renderForecastAlert(loc) {
   var banner = document.getElementById("forecast-alert");
   if (!banner || !APP.forecast) return;
-  var thr = APP.alertThreshold();
+  var thr = APP.alertThreshold();  // modeled probability %, the scientific decision boundary
   var alertDays = [], highDays = [];
   APP.forecast.dates.forEach(function (d) {
     var cell = APP.forecast.features[d] && APP.forecast.features[d][loc];
     if (!cell) return;
-    var ori = APP.oriFor(cell);
-    if (ori >= 50) highDays.push(d);
-    else if (ori >= thr) alertDays.push(d);
+    var prob = APP.oriFor(cell);
+    if (APP.indexFor(cell) >= 85) highDays.push(d);  // High tier on the index
+    else if (prob >= thr) alertDays.push(d);         // above the alert line (index ≥ 50)
   });
+  var thrNote = 'Alert line = Odor Index 50 (the model\'s data-derived ' + thr.toFixed(1) +
+                '% probability threshold).';
   banner.className = "forecast-alert";
   if (highDays.length) {
     banner.classList.add("alert-high");
     banner.innerHTML =
       '<strong>🚨 High Odor Risk Forecast</strong>' +
       highDays.length + ' day' + (highDays.length > 1 ? 's' : '') +
-      ' showing <b>High risk</b> conditions (ORI ≥ 50%) and ' +
-      (alertDays.length + highDays.length - highDays.length) + ' additional Elevated day' +
-      (alertDays.length !== 1 ? 's' : '') + ' in the 16-day window.' +
+      ' showing <b>High risk</b> (Odor Index ≥ 85) and ' +
+      alertDays.length + ' additional day' +
+      (alertDays.length !== 1 ? 's' : '') + ' above the alert line in the 16-day window.' +
       '<div class="alert-days">High risk days: ' +
       highDays.map(function(d){ var dt=new Date(d+'T00:00:00'); return dt.toLocaleDateString(undefined,{month:'short',day:'numeric'}); }).join(', ') +
       '</div>' +
-      '<div class="alert-days">Alert threshold: ORI ≥ ' + thr.toFixed(1) + '% (data-derived optimal for this model)</div>';
+      '<div class="alert-days">' + thrNote + '</div>';
   } else if (alertDays.length) {
     banner.classList.add("alert-elevated");
     banner.innerHTML =
       '<strong>⚠️ Elevated Odor Risk Forecast</strong>' +
       alertDays.length + ' day' + (alertDays.length > 1 ? 's' : '') +
-      ' in the next 16 days exceed the alert threshold (ORI ≥ ' + thr.toFixed(1) + '%). ' +
+      ' in the next 16 days are above the alert line (Odor Index ≥ 50). ' +
       'Residents near industrial areas may notice elevated odors on these days.' +
       '<div class="alert-days">' +
       alertDays.map(function(d){ var dt=new Date(d+'T00:00:00'); return dt.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'}); }).join(' · ') +
-      '</div>';
+      '</div>' +
+      '<div class="alert-days">' + thrNote + '</div>';
   }
 }
 
@@ -388,17 +389,17 @@ function renderForecastGrid() {
   APP.forecast.dates.forEach(function (d) {
     var cell = APP.forecast.features[d][loc];
     if (!cell) return;
-    var ori = APP.oriFor(cell);
-    var tier = OdorModel.getRiskTier(ori);
-    var rgb = "rgb(" + tier.rgb.join(",") + ")";
+    var v = APP.riskView(cell);
+    var rgb = "rgb(" + v.tier.rgb.join(",") + ")";
     var dt = new Date(d + "T00:00:00");
     var card = document.createElement("div");
     card.className = "clean-card";
     card.innerHTML =
       '<div style="font-weight:600;font-size:0.78rem;">' + dt.toLocaleDateString(undefined, {weekday: "short"}) + '</div>' +
       '<div style="font-size:0.68rem;opacity:0.6;">' + dt.toLocaleDateString(undefined, {month: "short", day: "numeric"}) + '</div>' +
-      '<div style="font-size:1.4rem;font-weight:700;color:' + rgb + ';margin:0.25rem 0;">' + ori.toFixed(1) + '%</div>' +
-      '<span class="badge-pill ' + tier.cls + '">' + tier.label.split(" ")[0] + '</span>';
+      '<div title="' + v.tip + '" style="font-size:1.5rem;font-weight:700;color:' + rgb + ';margin:0.25rem 0 0;cursor:help;">' + Math.round(v.idx) + '</div>' +
+      '<div style="font-size:0.55rem;opacity:0.6;margin-bottom:0.2rem;">Odor Index · hover for %</div>' +
+      '<span class="badge-pill ' + v.tier.cls + '">' + v.tier.label.split(" ")[0] + '</span>';
     grid.appendChild(card);
   });
   renderForecastAlert(loc);
@@ -450,18 +451,18 @@ function renderMap() {
       var locId = f.properties.GEOID || f.properties.zip || f.properties.ZCTA5CE10 || "";
       var cell = feats[locId];
       if (!cell) return {color: "#94a3b8", weight: 1, fillColor: "#cbd5e1", fillOpacity: 0.2};
-      var tier = OdorModel.getRiskTier(APP.oriFor(cell));
+      var tier = OdorModel.getRiskTier(APP.indexFor(cell));
       return {color: "#475569", weight: 1.5, fillColor: "rgb(" + tier.rgb.join(",") + ")", fillOpacity: 0.45};
     },
     onEachFeature: function (f, layer) {
       var locId = f.properties.GEOID || f.properties.zip || f.properties.ZCTA5CE10 || "";
       var cell = feats[locId];
-      var ori = cell ? APP.oriFor(cell) : null;
-      var tier = cell ? OdorModel.getRiskTier(ori) : {label: "N/A"};
+      var v = cell ? APP.riskView(cell) : null;
       var displayName = f.properties.display_name || f.properties.NAME || locId;
       layer.bindTooltip(
-        "Area: " + displayName + "<br>ORI: " +
-        (ori === null ? "N/A" : ori.toFixed(1) + "%") + "<br>" + tier.label
+        "Area: " + displayName + "<br>Odor Index: " +
+        (v === null ? "N/A" : Math.round(v.idx) + " (" + v.prob.toFixed(1) + "% chance)") +
+        "<br>" + (v === null ? "N/A" : v.tier.label)
       );
     },
   }).addTo(ms.map);
@@ -484,15 +485,14 @@ function renderMonthly() {
     var div = document.createElement("div");
     div.className = "clean-card";
     if (cell) {
-      var ori = APP.oriFor(cell);
-      var tier = OdorModel.getRiskTier(ori);
+      var v = APP.riskView(cell);
       var dt = new Date(d + "T00:00:00");
       div.innerHTML =
         '<div style="font-size:0.68rem;opacity:0.6;">' + dt.toLocaleDateString(undefined, {month: "short", day: "numeric"}) + '</div>' +
-        '<div style="font-size:1.1rem;font-weight:700;color:rgb(' + tier.rgb.join(",") + ');">' + ori.toFixed(1) + '%</div>' +
-        '<span class="badge-pill ' + tier.cls + '" title="Wind ' + cell.wind_speed.toFixed(1) + ' mph @ ' +
-        Math.round(cell.wind_dir) + '°, PBLH ' + Math.round(cell.blh) + ' ft, Rain ' + cell.precip.toFixed(2) + ' in">' +
-        tier.label.split(" ")[0] + '</span>';
+        '<div title="' + v.tip + '" style="font-size:1.2rem;font-weight:700;color:rgb(' + v.tier.rgb.join(",") + ');cursor:help;">' + Math.round(v.idx) + '</div>' +
+        '<span class="badge-pill ' + v.tier.cls + '" title="Wind ' + cell.wind_speed.toFixed(1) + ' mph @ ' +
+        Math.round(cell.wind_dir) + '°, PBLH ' + Math.round(cell.blh) + ' ft, Rain ' + cell.precip.toFixed(2) + ' in · ' + v.prob.toFixed(1) + '% chance">' +
+        v.tier.label.split(" ")[0] + '</span>';
     }
     cal.appendChild(div);
   });
@@ -631,6 +631,7 @@ function renderMethodsTab() {
       '<th>Model</th><th>Alert threshold (ORI)</th><th>F1 at threshold</th></tr></thead>' +
       '<tbody>' + thrRows + '</tbody></table>' +
       '<p style="font-size:0.78rem;color:#64748b;margin-top:0.3rem;margin-bottom:0;">' +
+      'The <b>alert line (Odor Index 50)</b> is where each model\'s data-derived probability threshold below lands on the 0–100 scale — that probability is the actual scientific decision boundary; index 50 is just its label. It is the <b>F1-optimal</b> cutoff (the probability that best balances catching real odor days against false alarms), so it is chosen by the data, not by hand. ' +
       'Thresholds are set by <b>coefficient family</b>, so the two weather-only models (Exact Pittsburgh and Pittsburgh Transfer) share one and the two Pittsburgh proximity models share another — the Exact/Transfer pressure offset is a uniform shift that does not change the optimal threshold. ' +
       'The <b>weather-only threshold (36.8%)</b> comes from the daily city-wide analysis in the Pittsburgh notebook (one row per date, city-level WOB binarized vs its mean) — the correct granularity for a spatially-flat model where every tract gets the same ORI on a given day. ' +
       'The raw zip-day F1-optimal threshold (6.97%) is an artifact of evaluating a spatially-flat model against spatially-varying zip labels and is not used for alerts. ' +
@@ -641,8 +642,12 @@ function renderMethodsTab() {
   html +=
     '<div class="method-card">' +
     '<h2>How these forecasts work</h2>' +
-    '<p>Every forecast is an <b>Odor Risk Index (ORI)</b> — the estimated probability (0–100%) of a ' +
-    'community-wide odor event on that day. Two distinct factors drive the score:</p>' +
+    '<p>Every forecast is shown as an <b>Odor Risk Index (0–100)</b>. Under the hood the model produces a ' +
+    'calibrated <b>probability</b> of a reported community-wide odor event that day; because such events are ' +
+    'relatively rare, those probabilities are honest but small (a bad day is ~40%), which reads as deceptively ' +
+    '“low.” So — exactly like the EPA Air Quality Index — we rescale the probability onto a 0–100 index with the ' +
+    '<b>alert line fixed at 50</b>, so the number tracks how notable a day is. <b>The underlying probability is not ' +
+    'hidden:</b> hover any day (or open a map area) to see the exact modeled % chance. Two distinct factors drive the score:</p>' +
     '<ul>' +
     '<li><b>Atmospheric trapping conditions</b> — temperature inversions, boundary-layer height, wind speed, ' +
     'humidity, and related variables that determine whether odors stay concentrated near the ground.</li>' +
@@ -658,11 +663,11 @@ function renderMethodsTab() {
     '{Exact, Transfer} × {weather-only, Proximity} that differ on whether they add the proximity terms above and whether ' +
     'they apply the Pittsburgh→Calvert pressure correction, plus a <b>pooled two-city (Pittsburgh + Louisville) proximity ' +
     'model — the current default</b>, which learns the trapping physics both cities share. ' +
-    'The color tiers are <b>anchored to each model\'s alert threshold</b> — Clear stays below the alert line, ' +
-    'then Moderate, Elevated (~2×), and High (~3×) — so a flagged day is never painted green and the colors track ' +
-    'how notable a day is on that model\'s own scale (shown here for the active model):</p>' +
+    'On the 0–100 index the color tiers are fixed: below <b>50</b> is Clear (under the alert line), then Moderate, ' +
+    'Elevated, and High. Because every model is rescaled to put its own alert threshold at 50, the tiers mean the ' +
+    'same thing no matter which model you pick:</p>' +
     '<div class="tier-row">' +
-    tierLegendHtml("Clear / Low", true) +
+    tierLegendHtml("Clear / Low") +
     '</div>' +
     (thrTable
       ? '<div style="margin-top:0.8rem;"><b style="font-size:0.9rem;">Data-derived alert thresholds (per model)</b>' + thrTable + '</div>'
@@ -1038,7 +1043,7 @@ function renderHourly() {
       var cell = (APP.hourly.features[dt] || {})[locId];
       var z    = zVals[h];
       var ori  = z !== null ? Math.round((100 / (1 + Math.exp(-(z + shift)))) * 10) / 10 : null;
-      hours.push({h: h, dt: dt, cell: cell, ori: ori});
+      hours.push({h: h, dt: dt, cell: cell, ori: ori, idx: ori !== null ? OdorModel.computeIndex(ori, APP.alertThreshold()) : null});
     }
   } else {
     // Daily-constant-input fallback: substitute *_d fields for daily-natured features
@@ -1057,7 +1062,7 @@ function renderHourly() {
         };
         ori = APP.oriFor(fc);
       }
-      hours.push({h: h, dt: dt, cell: cell, ori: ori});
+      hours.push({h: h, dt: dt, cell: cell, ori: ori, idx: ori !== null ? OdorModel.computeIndex(ori, APP.alertThreshold()) : null});
     }
   }
 
@@ -1075,7 +1080,7 @@ function renderHourly() {
   // Area + line paths
   var areaPath = '', linePath = '';
   if (valid.length > 0) {
-    var pts = valid.map(function(d) { return hx(d.h) + ',' + vy(d.ori); });
+    var pts = valid.map(function(d) { return hx(d.h) + ',' + vy(d.idx); });
     linePath = 'M' + pts.join('L');
     var f = valid[0], l = valid[valid.length - 1];
     areaPath = linePath + 'L' + hx(l.h) + ',' + (PT + plotH) + 'L' + hx(f.h) + ',' + (PT + plotH) + 'Z';
@@ -1089,9 +1094,9 @@ function renderHourly() {
       '<text x="' + (PL - 4) + '" y="' + (y + 4) + '" text-anchor="end" font-size="9" fill="#94a3b8">' + v + '</text>';
   }).join('');
 
-  // Tier threshold dashed lines
+  // Tier threshold dashed lines (Odor Index bands: alert 50, elevated 70, high 85)
   var threshSvg = [
-    {pct: 15, color: '#86efac'}, {pct: 30, color: '#fde047'}, {pct: 50, color: '#fdba74'}
+    {pct: 50, color: '#fde047'}, {pct: 70, color: '#fdba74'}, {pct: 85, color: '#fca5a5'}
   ].map(function(t) {
     var y = vy(t.pct);
     return '<line x1="' + PL + '" y1="' + y + '" x2="' + (PL + plotW) + '" y2="' + y +
@@ -1111,9 +1116,9 @@ function renderHourly() {
 
   // Data circles with title tooltips
   var circlesSvg = valid.map(function(d) {
-    var tier = OdorModel.getRiskTier(d.ori);
+    var tier = OdorModel.getRiskTier(d.idx);
     var lbl  = d.h === 0 ? '12am' : d.h < 12 ? d.h + 'am' : d.h === 12 ? '12pm' : (d.h - 12) + 'pm';
-    var tip  = lbl + ': index ' + d.ori.toFixed(1);
+    var tip  = lbl + ': index ' + Math.round(d.idx) + ' (' + d.ori.toFixed(1) + '% chance)';
     if (d.cell) {
       tip += '\nTemp: ' + d.cell.temp.toFixed(1) + '°F';
       tip += '\nBLH: ' + Math.round(d.cell.blh) + ' ft';
@@ -1124,7 +1129,7 @@ function renderHourly() {
         tip += '\nWind (daily avg): ' + (d.cell.wind_speed_d || 0).toFixed(1) + ' mph @ ' + Math.round(d.cell.wind_dir_d || 0) + '°';
       }
     }
-    return '<circle cx="' + hx(d.h) + '" cy="' + vy(d.ori) + '" r="3" ' +
+    return '<circle cx="' + hx(d.h) + '" cy="' + vy(d.idx) + '" r="3" ' +
       'fill="rgb(' + tier.rgb.join(',') + ')" stroke="#fff" stroke-width="1">' +
       '<title>' + tip + '</title></circle>';
   }).join('');
@@ -1132,11 +1137,12 @@ function renderHourly() {
   // Dashed daily-ORI anchor line
   var refLineSvg = '';
   if (dailyOri !== null) {
-    var refY = vy(dailyOri);
+    var dailyIdx = OdorModel.computeIndex(dailyOri, APP.alertThreshold());
+    var refY = vy(dailyIdx);
     refLineSvg =
       '<line x1="' + PL + '" y1="' + refY + '" x2="' + (PL + plotW) + '" y2="' + refY +
         '" stroke="#1e293b" stroke-width="1.5" stroke-dasharray="6,4"/>' +
-      '<text x="' + (PL + 4) + '" y="' + (refY - 3) + '" font-size="8.5" fill="#1e293b" font-weight="600">Daily ORI ' + dailyOri.toFixed(1) + '%</text>';
+      '<text x="' + (PL + 4) + '" y="' + (refY - 3) + '" font-size="8.5" fill="#1e293b" font-weight="600">Daily Index ' + Math.round(dailyIdx) + ' (' + dailyOri.toFixed(1) + '%)</text>';
   }
 
   var svgAriaLabel = useFitted ? 'Hourly odor risk (fitted case-crossover model)' : 'Relative trapping conditions through the day';
@@ -1153,14 +1159,15 @@ function renderHourly() {
 
   // 24-cell colored hour strip
   var stripCells = hours.map(function(d) {
-    var tier     = d.ori !== null ? OdorModel.getRiskTier(d.ori) : {rgb: [148, 163, 184]};
-    var textCol  = (d.ori !== null && d.ori >= 15) ? '#fff' : '#334155';
+    var tier     = d.idx !== null ? OdorModel.getRiskTier(d.idx) : {rgb: [148, 163, 184]};
+    var textCol  = (d.idx !== null && d.idx >= 50) ? '#fff' : '#334155';
     var hLbl     = d.h === 0 ? '12a' : d.h < 12 ? d.h + 'a' : d.h === 12 ? '12p' : (d.h - 12) + 'p';
-    var oriStr   = d.ori !== null ? d.ori.toFixed(0) : '—';
+    var oriStr   = d.idx !== null ? Math.round(d.idx) : '—';
     var tip = '';
     if (d.cell) {
       var full = d.h === 0 ? '12am' : d.h < 12 ? d.h + 'am' : d.h === 12 ? '12pm' : (d.h - 12) + 'pm';
-      tip = full + ': index ' + (d.ori !== null ? d.ori.toFixed(1) : '—') +
+      tip = full + ': index ' + (d.idx !== null ? Math.round(d.idx) : '—') +
+        (d.ori !== null ? ' (' + d.ori.toFixed(1) + '% chance)' : '') +
         ' | Temp ' + d.cell.temp.toFixed(1) + '°F, BLH ' + Math.round(d.cell.blh) + 'ft';
     }
     return '<div class="hour-cell" style="background:rgb(' + tier.rgb.join(',') + ');color:' + textCol + ';" title="' + tip + '">' +
@@ -1174,7 +1181,7 @@ function renderHourly() {
     : '— Daily model (constant-input), BLH &amp; temp vary';
   var legend =
     '<div class="hourly-legend">' +
-    tierLegendHtml("Favorable", false) +
+    tierLegendHtml("Favorable") +
     '<span style="font-size:0.72rem;color:#64748b;align-self:center;margin-left:0.3rem;">' + legendSubtitle + '</span>' +
     '</div>';
 
@@ -1276,7 +1283,7 @@ async function buildHourlyTab() {
         var cell = dailyFeats[fid];
         var isSel = (fid === _hourlyLocId);
         if (!cell) return {color: isSel ? "#1e3a8a" : "#94a3b8", weight: isSel ? 3 : 1, fillColor: "#cbd5e1", fillOpacity: isSel ? 0.35 : 0.15};
-        var tier = OdorModel.getRiskTier(APP.oriFor(cell));
+        var tier = OdorModel.getRiskTier(APP.indexFor(cell));
         return {
           color: isSel ? "#1e3a8a" : "#475569",
           weight: isSel ? 3 : 1.2,
@@ -1294,8 +1301,8 @@ async function buildHourlyTab() {
           renderHourly();
         });
         var cell = dailyFeats[fid];
-        var ori  = cell ? APP.oriFor(cell) : null;
-        layer.bindTooltip(dname + (ori ? "<br>Daily ORI: " + ori.toFixed(1) + "%" : ""), {sticky: true});
+        var v  = cell ? APP.riskView(cell) : null;
+        layer.bindTooltip(dname + (v ? "<br>Daily Index: " + Math.round(v.idx) + " (" + v.prob.toFixed(1) + "% chance)" : ""), {sticky: true});
       },
     }).addTo(m);
   }
@@ -1374,10 +1381,9 @@ function wireLocateMapButton() {
         var locId = near.id || near.zip;
         var cell = (APP.forecast.features[APP.forecast.dates[0]] || {})[locId];
         if (cell) {
-          var ori = APP.oriFor(cell);
-          var tier = OdorModel.getRiskTier(ori);
+          var v = APP.riskView(cell);
           L.popup().setLatLng([lat, lon])
-            .setContent("<b>Nearest area:</b> " + near.name + "<br><b>ORI: " + ori + "%</b> — " + tier.label)
+            .setContent("<b>Nearest area:</b> " + near.name + "<br><b>Odor Index: " + Math.round(v.idx) + "</b> — " + v.tier.label + "<br>(" + v.prob.toFixed(1) + "% modeled chance)")
             .openOn(APP._map);
         }
       }
@@ -1398,7 +1404,6 @@ async function main() {
   buildModeSelect();
   buildCustomCoeffSliders();
   wireControls();
-  APP.syncTierBounds();  // anchor color tiers to the default model's alert threshold before first render
 
   mapPanelScaffold();
   wireLocateMapButton();

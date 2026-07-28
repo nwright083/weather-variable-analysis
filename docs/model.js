@@ -51,20 +51,28 @@
     return Math.round((100 / (1 + Math.exp(-z))) * 10) / 10;
   }
 
-  // Risk-tier band edges [Clear/Moderate, Moderate/Elevated, Elevated/High], in ORI %.
-  // Anchored to the active model's alert threshold (set by app.js via setTierBounds) so a
-  // day at/above the alert line is never painted "Clear". Defaults match the legacy fixed
-  // scale until app.js syncs them to the current model.
-  var TIER_BOUNDS = [15, 30, 50];
-  function setTierBounds(b) {
-    if (b && b.length === 3 && b[0] < b[1] && b[1] < b[2]) TIER_BOUNDS = [b[0], b[1], b[2]];
+  // Public-facing Odor Risk Index (0-100). The raw ORI is a calibrated PROBABILITY of a
+  // reported odor event; for rare events those numbers are honest but small (a bad day ~40%),
+  // which reads as "low" to a lay audience. We rescale the probability onto a 0-100 index
+  // anchored to the model's own alert threshold T so the alert line always lands at 50 and
+  // the number tracks how notable a day is on that model's scale. This is exactly how EPA AQI
+  // etc. work: the index is the public number, the underlying quantity (here, the probability,
+  // kept and shown in the tooltip/methodology) is the science. Index 100 is reached at ~4x the
+  // alert threshold. Piecewise-linear: [0,T]->[0,50], [T,4T]->[50,100].
+  function computeIndex(probPct, alertPct) {
+    var T = (alertPct && alertPct > 0) ? alertPct : 12;
+    var cap = 4 * T;
+    var I = (probPct <= T) ? 50 * (probPct / T)
+                           : 50 + 50 * (probPct - T) / (cap - T);
+    return Math.max(0, Math.min(100, I));
   }
-  function tierBounds() { return TIER_BOUNDS.slice(); }
 
-  function getRiskTier(ori) {
-    if (ori < TIER_BOUNDS[0]) return { label: "Clear / Low Risk", cls: "badge-clear", rgb: [22, 163, 74] };
-    if (ori < TIER_BOUNDS[1]) return { label: "Moderate Risk", cls: "badge-moderate", rgb: [202, 138, 4] };
-    if (ori < TIER_BOUNDS[2]) return { label: "Elevated Risk", cls: "badge-elevated", rgb: [234, 88, 12] };
+  // Risk tiers operate on the normalized INDEX, so bands are fixed for every model:
+  // below the alert line (50) is Clear; then Moderate, Elevated, High.
+  function getRiskTier(indexVal) {
+    if (indexVal < 50) return { label: "Clear / Low Risk", cls: "badge-clear", rgb: [22, 163, 74] };
+    if (indexVal < 70) return { label: "Moderate Risk", cls: "badge-moderate", rgb: [202, 138, 4] };
+    if (indexVal < 85) return { label: "Elevated Risk", cls: "badge-elevated", rgb: [234, 88, 12] };
     return { label: "High Risk", cls: "badge-high", rgb: [220, 38, 38] };
   }
 
@@ -83,7 +91,7 @@
   }
 
   var api = { computeZ: computeZ, computeOri: computeOri, getRiskTier: getRiskTier,
-              setTierBounds: setTierBounds, tierBounds: tierBounds, hourlyZ: hourlyZ };
+              computeIndex: computeIndex, hourlyZ: hourlyZ };
   if (typeof module !== "undefined" && module.exports) { module.exports = api; }
   root.OdorModel = api;
 })(typeof window !== "undefined" ? window : globalThis);
