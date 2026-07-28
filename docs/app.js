@@ -18,6 +18,33 @@ function tierLegendHtml(firstLabel) {
     '<span class="badge-pill badge-high">High ≥ 85</span>';
 }
 
+// Lightweight custom hover tooltip — immediate, works anywhere on the bound element
+// (the native `title` tooltip is slow and its hit-target was only the number).
+var _tipEl = null;
+function _tipNode() {
+  if (!_tipEl) {
+    _tipEl = document.createElement("div");
+    _tipEl.setAttribute("role", "tooltip");
+    _tipEl.style.cssText = "position:fixed;z-index:10000;pointer-events:none;max-width:230px;" +
+      "background:#0f172a;color:#f8fafc;font-size:12px;line-height:1.4;padding:8px 10px;" +
+      "border-radius:8px;box-shadow:0 6px 20px rgba(2,6,23,.35);opacity:0;transition:opacity .09s ease;";
+    document.body.appendChild(_tipEl);
+  }
+  return _tipEl;
+}
+function bindTip(el, html) {
+  el.style.cursor = "help";
+  el.addEventListener("mouseenter", function () { var t = _tipNode(); t.innerHTML = html; t.style.opacity = "1"; });
+  el.addEventListener("mousemove", function (e) {
+    var t = _tipNode();
+    var x = e.clientX + 14, y = e.clientY + 16;
+    if (x + 240 > window.innerWidth) x = e.clientX - 240;
+    if (y + 90 > window.innerHeight) y = e.clientY - 90;
+    t.style.left = x + "px"; t.style.top = y + "px";
+  });
+  el.addEventListener("mouseleave", function () { if (_tipEl) _tipEl.style.opacity = "0"; });
+}
+
 const APP = {
   meta: null, forecast: null, historical: null, hourly: null,
   _callbacks: [],
@@ -397,9 +424,11 @@ function renderForecastGrid() {
     card.innerHTML =
       '<div style="font-weight:600;font-size:0.78rem;">' + dt.toLocaleDateString(undefined, {weekday: "short"}) + '</div>' +
       '<div style="font-size:0.68rem;opacity:0.6;">' + dt.toLocaleDateString(undefined, {month: "short", day: "numeric"}) + '</div>' +
-      '<div title="' + v.tip + '" style="font-size:1.5rem;font-weight:700;color:' + rgb + ';margin:0.25rem 0 0;cursor:help;">' + Math.round(v.idx) + '</div>' +
+      '<div style="font-size:1.5rem;font-weight:700;color:' + rgb + ';margin:0.25rem 0 0;">' + Math.round(v.idx) + '</div>' +
       '<div style="font-size:0.55rem;opacity:0.6;margin-bottom:0.2rem;">Odor Index · hover for %</div>' +
       '<span class="badge-pill ' + v.tier.cls + '">' + v.tier.label.split(" ")[0] + '</span>';
+    bindTip(card, v.prob.toFixed(1) + '% modeled chance of a reported odor event' +
+      '<br><span style="opacity:.75">the 0–100 Odor Index rescales this so the alert line = 50</span>');
     grid.appendChild(card);
   });
   renderForecastAlert(loc);
@@ -489,10 +518,10 @@ function renderMonthly() {
       var dt = new Date(d + "T00:00:00");
       div.innerHTML =
         '<div style="font-size:0.68rem;opacity:0.6;">' + dt.toLocaleDateString(undefined, {month: "short", day: "numeric"}) + '</div>' +
-        '<div title="' + v.tip + '" style="font-size:1.2rem;font-weight:700;color:rgb(' + v.tier.rgb.join(",") + ');cursor:help;">' + Math.round(v.idx) + '</div>' +
-        '<span class="badge-pill ' + v.tier.cls + '" title="Wind ' + cell.wind_speed.toFixed(1) + ' mph @ ' +
-        Math.round(cell.wind_dir) + '°, PBLH ' + Math.round(cell.blh) + ' ft, Rain ' + cell.precip.toFixed(2) + ' in · ' + v.prob.toFixed(1) + '% chance">' +
-        v.tier.label.split(" ")[0] + '</span>';
+        '<div style="font-size:1.2rem;font-weight:700;color:rgb(' + v.tier.rgb.join(",") + ');">' + Math.round(v.idx) + '</div>' +
+        '<span class="badge-pill ' + v.tier.cls + '">' + v.tier.label.split(" ")[0] + '</span>';
+      bindTip(div, v.prob.toFixed(1) + '% modeled chance of a reported odor event' +
+        '<br><span style="opacity:.75">Wind ' + cell.wind_speed.toFixed(1) + ' mph, PBLH ' + Math.round(cell.blh) + ' ft, Rain ' + cell.precip.toFixed(2) + ' in</span>');
     }
     cal.appendChild(div);
   });
