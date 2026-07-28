@@ -130,7 +130,7 @@ function buildModeSelect() {
 function buildCustomCoeffSliders() {
   var box = document.getElementById("custom-coeffs");
   var ranges = APP.meta.custom_slider_ranges;
-  var proxDefs = APP.meta.coeffs.pittsburgh_transfer_proximity || APP.meta.coeffs.pittsburgh_proximity || {};
+  var proxDefs = APP.meta.coeffs.pooled_transfer_proximity || {};
   var wd = APP.meta.wind_defaults;
   var dd = APP.meta.distance_defaults;
 
@@ -520,70 +520,16 @@ function renderReportTab() {
 // prose stays editable without touching the data pipeline. Any mode present in
 // meta.mode_labels but missing here falls back to a generic description.
 var MODE_DOCS = {
-  exact_pittsburgh: {
-    tagline: "The raw Pittsburgh model, coefficients untouched — a reference baseline.",
-    data: "Pittsburgh city-wide daily logistic regression, used exactly as fitted.",
-    how: "The raw Pittsburgh science applied to Calvert weather with no proximity terms and " +
-      "<b>no pressure-transfer correction</b>. Inputs are still put on the training scale (boundary-layer " +
-      "height in feet; reporting-calendar de-biased), but nothing Calvert-specific is added.",
-    notes: [
-      "Useful as a 'what does the original model say, untouched?' reference.",
-      "Differs from Pittsburgh Transfer only by the ~+0.8 pt pressure-elevation offset (turned off here).",
-    ],
-    best: "Reference/comparison baseline.",
-  },
-  exact_pittsburgh_proximity: {
-    tagline: "Raw Pittsburgh coefficients, plus location + wind awareness — no Calvert pressure correction.",
-    data: "Pittsburgh zip-day panel — ~36,600 observations (every tract × every day), 2018–2026.",
-    how: "Adds the two spatial terms below to the raw Pittsburgh coefficients, but keeps the " +
-      "pressure-transfer correction <b>off</b>. Use it to see the spatial model without the Calvert-frame nudge.",
-    notes: [
-      "Spatial terms make the map show different risk per tract on the same day.",
-      "Identical to Transfer + Proximity apart from the pressure offset.",
-    ],
-    best: "Comparison: the spatial model in its untransferred form.",
-  },
-  pittsburgh_transfer: {
-    tagline: "Pittsburgh model transferred into Calvert's frame — weather only.",
-    data: "Pittsburgh city-wide daily logistic regression, coefficients as fitted.",
-    how: "The Pittsburgh coefficients with the <b>Pittsburgh→Calvert pressure-elevation offset applied</b> " +
-      "(Calvert sits ~250 m lower, so its pressures are shifted into Pittsburgh's training frame). Still no " +
-      "proximity terms — every tract gets the same regional trapping score on a given day.",
-    notes: [
-      "The pressure offset is a small, uniform baseline shift, not a re-fit.",
-      "The non-spatial companion to the Pittsburgh proximity model.",
-    ],
-    best: "A clean regional trapping signal, Calvert-frame corrected.",
-  },
-  pittsburgh_transfer_proximity: {
-    tagline: "Pittsburgh-only proximity model, Calvert-frame corrected and aware of where you are relative to the odor sources and the wind. (Superseded as default by the pooled two-city model.)",
-    data: "Pittsburgh zip-day panel — ~36,600 observations (every tract × every day), 2018–2026, logistic regression.",
-    how: "The most complete model: Pittsburgh coefficients with the pressure-transfer correction, plus two " +
-      "spatial terms fitted in the same regression — <b>nearest-source proximity</b> (risk decays with distance " +
-      "from whichever emitter you are closest to — the Calvert City industrial complex <i>or</i> the TVA Shawnee " +
-      "Fossil Plant near Paducah) and <b>wind alignment</b> to that source (higher risk when the wind carries air " +
-      "from it toward you). This is why the map shows different risk for different tracts on the same day.",
-    notes: [
-      "Debiased: day-of-week and holiday <i>reporting</i> habits are removed so only weather/physics drive the score.",
-      "Precipitation was corrected to −0.909 (the raw panel fit had an overfitting artifact that forced rainy days to 100%); a controlled city-wide re-fit reproduces this value, so it is the model's own validated coefficient, not a hand-set constant.",
-      "Multi-source: the nearest emitter drives each tract, so adding Shawnee raises risk near Paducah without inflating tracts already close to Calvert.",
-    ],
-    best: "The single-city spatial model: spatial + wind-direction aware, Calvert-frame corrected. Kept as a reference alongside the pooled default.",
-  },
   pooled_transfer_proximity: {
-    tagline: "Default. Two-city physics: Pittsburgh + Louisville pooled, then transferred into Calvert's frame with location + wind awareness.",
-    data: "Pittsburgh (~44,500 obs) and Louisville (~5,700 obs) zip-day panels stacked together, one logistic regression, with a city term absorbing the base-rate difference.",
-    how: "Same recipe as the default, but the weather + proximity coefficients are fit on <b>both</b> cities at once, " +
-      "weighting each city equally so Pittsburgh's larger report volume (~89% of the data) doesn't drown out Louisville. " +
-      "Pooling keeps the trapping signal the two cities agree on (their standardized coefficients correlate at r=0.93) " +
-      "and averages out single-city quirks — a more robust basis for a third city that has no local reports of its own. " +
-      "Deployed in Calvert's frame (pressure-transfer on) with the same nearest-source proximity and wind-alignment terms.",
+    tagline: "Predicts when the atmosphere will trap and concentrate odor near the industrial sources — pooled from two well-monitored cities and read in Calvert's frame.",
+    data: "A single logistic regression fit on daily records from Pittsburgh and Louisville — two cities with dense public odor-report and weather data — pooled with each city weighted equally.",
+    how: "Each day's forecast is scored on two things: <b>trapping conditions</b> (diurnal temperature swing, boundary-layer height, wind speed, humidity, and related variables that decide whether odor stays near the ground), and <b>where you are</b> relative to the emitters — <b>nearest-source proximity</b> (risk decays with distance from the closest emitter: the Calvert City industrial complex or the TVA Shawnee plant) and <b>wind alignment</b> to that source. Calvert's lower elevation is corrected into the training frame.",
     notes: [
-      "Equal-city weighting lifts Louisville accuracy to AUC 0.903 (from 0.873) while Pittsburgh is unharmed (0.909) — the physics generalizes.",
-      "Reads a few points <i>lower</i> on trapping days than the default (more conservative); windy and rainy days still correctly read near-zero.",
-      "Precipitation carries the same validated −0.909 correction; day-of-week/holiday de-biasing is kept (universal reporting cycles).",
+      "It models the <b>meteorology</b> (whether the air will trap odor), not the emissions (whether odor is being released) — so it is best read as a <b>relative</b> day-to-day indicator, shown as the 0–100 index.",
+      "Day-of-week and holiday reporting habits are removed so weather and location drive the score, not human reporting cycles.",
+      "Validated against Calvert's own VOC air monitors it tracks the region's signature pollutant, vinyl chloride, best — evidence the trapping signal is physically real here.",
     ],
-    best: "The default: a more city-independent, slightly more conservative trapping model for Calvert, validated not-overfit (in-sample vs 5-fold cross-validated AUC gap under 0.4 points).",
+    best: "The deployed model: a physically-grounded, honest relative indicator of odor-trapping risk for the Calvert City area.",
   },
   calvert_fitted: {
     tagline: "Fitted directly from real Calvert City odor reports.",
@@ -631,13 +577,8 @@ function renderMethodsTab() {
       '<th>Model</th><th>Alert threshold (ORI)</th><th>F1 at threshold</th></tr></thead>' +
       '<tbody>' + thrRows + '</tbody></table>' +
       '<p style="font-size:0.78rem;color:#64748b;margin-top:0.3rem;margin-bottom:0;">' +
-      'The <b>alert line (Odor Index 50)</b> is where each model\'s data-derived probability threshold below lands on the 0–100 scale — that probability is the actual scientific decision boundary; index 50 is just its label. It is the <b>F1-optimal</b> cutoff (the probability that best balances catching real odor days against false alarms), so it is chosen by the data, not by hand. ' +
-      'Thresholds are set by <b>coefficient family</b>, so the two weather-only models (Exact Pittsburgh and Pittsburgh Transfer) share one and the two Pittsburgh proximity models share another — the Exact/Transfer pressure offset is a uniform shift that does not change the optimal threshold. ' +
-      'The <b>weather-only threshold (36.8%)</b> comes from the daily city-wide analysis in the Pittsburgh notebook (one row per date, city-level WOB binarized vs its mean) — the correct granularity for a spatially-flat model where every tract gets the same ORI on a given day. ' +
-      'The raw zip-day F1-optimal threshold (6.97%) is an artifact of evaluating a spatially-flat model against spatially-varying zip labels and is not used for alerts. ' +
-      'The <b>Pittsburgh proximity threshold (20.4%)</b> is from the zip-day panel, appropriate because proximity scores genuinely differ per tract and the alert fires per selected tract. ' +
-      'The <b>pooled two-city threshold (12.0%)</b> is lower because the pooled Pittsburgh+Louisville model reads lower absolute probabilities; it is derived the same way on the pooled panel, so it fires at the same calibrated rate rather than under-firing. ' +
-      'These thresholds update automatically when a locally-fitted Calvert model is installed.</p>'
+      'The <b>alert line (Odor Index 50)</b> is where the model\'s data-derived probability threshold lands on the 0–100 scale — that probability is the actual decision boundary; index 50 is just its label. It is the <b>F1-optimal</b> cutoff (the probability that best balances catching real odor days against false alarms), chosen by the data, not by hand. ' +
+      'It updates automatically if a locally-fitted Calvert model is installed.</p>'
     : '';
   html +=
     '<div class="method-card">' +
@@ -659,13 +600,9 @@ function renderMethodsTab() {
     'community odor reports.</li>' +
     '</ul>' +
     '<p style="margin-bottom:0;">It predicts when the <b>atmosphere will trap and concentrate</b> odor near the ground — ' +
-    'not whether the source is actively emitting. The tool offers <b>five models</b> (detailed below): a 2×2 of ' +
-    '{Exact, Transfer} × {weather-only, Proximity} that differ on whether they add the proximity terms above and whether ' +
-    'they apply the Pittsburgh→Calvert pressure correction, plus a <b>pooled two-city (Pittsburgh + Louisville) proximity ' +
-    'model — the current default</b>, which learns the trapping physics both cities share. ' +
+    'not whether the source is actively emitting, so it is best read as a <b>relative</b> day-to-day indicator. ' +
     'On the 0–100 index the color tiers are fixed: below <b>50</b> is Clear (under the alert line), then Moderate, ' +
-    'Elevated, and High. Because every model is rescaled to put its own alert threshold at 50, the tiers mean the ' +
-    'same thing no matter which model you pick:</p>' +
+    'Elevated, and High:</p>' +
     '<div class="tier-row">' +
     tierLegendHtml("Clear / Low") +
     '</div>' +
@@ -687,13 +624,11 @@ function renderMethodsTab() {
     '<li><b>Wind speed</b> — stronger wind disperses odor and lowers risk.</li>' +
     '<li><b>Temperature</b> (with a quadratic term, °F²) <b>, humidity, solar radiation, pressure, precipitation</b> — secondary modifiers. The quadratic captures the non-linear curve: risk rises steeply outside a mid-range temperature window.</li>' +
     '</ul>' +
-    '<p style="margin-bottom:0;font-size:0.85rem;color:#64748b;"><b>De-biasing</b> is baked into every model ' +
+    '<p style="margin-bottom:0;font-size:0.85rem;color:#64748b;"><b>De-biasing</b> is built in ' +
     '(day-of-week and holiday <i>reporting</i> patterns are stripped out so the score reflects weather, not when ' +
-    'people happen to file reports). The <b>elevation pressure offset</b> (Pittsburgh sits ~250 m higher than ' +
-    'Calvert, so pressures are shifted into the training frame) is applied only by the <b>Transfer</b> models — ' +
-    'it is what distinguishes them from the Exact models (see the model descriptions below). It is a small, uniform ' +
-    'shift, and the corrected driver analysis finds pressure itself is not a robust predictor, so the two ' +
-    'weather-only models score almost identically.</p>' +
+    'people happen to file reports). An <b>elevation pressure offset</b> shifts Calvert\'s pressures into the ' +
+    'training frame (Pittsburgh sits ~250 m higher); it is a small, uniform correction. Diurnal temperature range is ' +
+    'the true daily high-minus-low, and each tract\'s exposure is driven by its nearest emitter.</p>' +
     '</div>';
 
   // ── Formula card ────────────────────────────────────────────────────────────
@@ -701,9 +636,10 @@ function renderMethodsTab() {
     // Show the two coefficient families (the Exact/Transfer split is the pressure
     // offset, not a coefficient, so it isn't a separate column here).
     var allModes = Object.keys(meta.coeffs || {}).filter(function(id) {
-      return ['exact_pittsburgh','pittsburgh_transfer_proximity'].indexOf(id) !== -1;
+      return id !== 'calvert_fitted';
     });
     var modeLabels = {
+      pooled_transfer_proximity:     'Coefficient',
       exact_pittsburgh:              'Weather-only',
       pittsburgh_transfer_proximity: 'Proximity',
     };
@@ -876,8 +812,8 @@ function renderMethodsTab() {
     var _VP = {L:44, R:14, T:18, B:44, W:330, H:210};
     var _vpw = _VP.W - _VP.L - _VP.R;
     var _vph = _VP.H - _VP.T - _VP.B;
-    var _VC = {exact_pittsburgh:'#3b82f6', pittsburgh_proximity:'#16a34a'};
-    var _VN = {exact_pittsburgh:'Exact Pittsburgh', pittsburgh_proximity:'Proximity-Enhanced'};
+    var _VC = {pooled_proximity:'#16a34a'};
+    var _VN = {pooled_proximity:'Odor Risk Model (Pittsburgh + Louisville)'};
 
     function _vx(v) { return _VP.L + v * _vpw; }
     function _vy(v) { return _VP.T + (1 - v) * _vph; }
@@ -908,7 +844,7 @@ function renderMethodsTab() {
     // ROC
     var _rocSvg = '<svg viewBox="0 0 ' + _VP.W + ' ' + _VP.H + '" class="val-chart-svg">' + _vGrid('False Positive Rate', 'True Positive Rate');
     _rocSvg += '<line x1="' + _vx(0).toFixed(1) + '" y1="' + _vy(0).toFixed(1) + '" x2="' + _vx(1).toFixed(1) + '" y2="' + _vy(1).toFixed(1) + '" stroke="#94a3b8" stroke-width="0.9" stroke-dasharray="4,3"/>';
-    ['exact_pittsburgh', 'pittsburgh_proximity'].forEach(function(mk) {
+    ['pooled_proximity'].forEach(function(mk) {
       var m = _mm.models[mk]; if (!m || !m.fpr) return;
       _rocSvg += _vPath(m.fpr, m.tpr, _VC[mk]);
     });
@@ -917,7 +853,7 @@ function renderMethodsTab() {
 
     // PR
     var _prSvg = '<svg viewBox="0 0 ' + _VP.W + ' ' + _VP.H + '" class="val-chart-svg">' + _vGrid('Recall', 'Precision');
-    ['exact_pittsburgh', 'pittsburgh_proximity'].forEach(function(mk) {
+    ['pooled_proximity'].forEach(function(mk) {
       var m = _mm.models[mk]; if (!m || !m.recall) return;
       _prSvg += _vPath(m.recall, m.precision, _VC[mk]);
       if (m.thr_opt !== undefined && m.recall.length) {
@@ -931,7 +867,7 @@ function renderMethodsTab() {
 
     // Legend
     var _legHtml = '<div class="val-legend">';
-    ['exact_pittsburgh', 'pittsburgh_proximity'].forEach(function(mk) {
+    ['pooled_proximity'].forEach(function(mk) {
       var m = _mm.models[mk]; if (!m) return;
       _legHtml += '<span class="val-legend-item"><span class="val-legend-dot" style="background:' + _VC[mk] + '"></span>' + _VN[mk] + ' (AUC ' + m.auc.toFixed(3) + ')</span>';
     });
@@ -940,10 +876,9 @@ function renderMethodsTab() {
     // Metrics table
     var _tblHtml = '<table class="metrics-table"><thead><tr><th>Model</th><th>AUC</th><th>CV-AUC</th><th>Pseudo-R²</th><th>Evaluated on</th></tr></thead><tbody>';
     var _tblDef = {
-      exact_pittsburgh:     {label:'Exact Pittsburgh',     basis:'Pittsburgh zip-day panel*'},
-      pittsburgh_proximity: {label:'Proximity-Enhanced',   basis:'Pittsburgh zip-day panel'},
+      pooled_proximity: {label:'Odor Risk Model (Pgh + Lou)', basis:'Pooled zip-day panel, cross-validated'},
     };
-    ['exact_pittsburgh', 'pittsburgh_proximity'].forEach(function(mk) {
+    ['pooled_proximity'].forEach(function(mk) {
       var m = _mm.models[mk], r = _tblDef[mk]; if (!m || !r) return;
       _tblHtml += '<tr><td>' + r.label + '</td><td>' + m.auc.toFixed(3) + '</td><td>' + (m.cv_auc ? m.cv_auc.toFixed(3) : '—') + '</td><td>' + (m.pseudo_r2 ? m.pseudo_r2.toFixed(3) : '—') + '</td><td style="font-size:0.78rem;color:#475569">' + r.basis + '</td></tr>';
     });
@@ -959,7 +894,7 @@ function renderMethodsTab() {
       _legHtml +
       _tblHtml +
       '<p style="font-size:0.8rem;color:#64748b;margin-top:0.7rem;">' +
-      '* <i>Exact Pittsburgh</i> is a daily city-wide model; evaluated here on the zip-day panel, so its AUC (0.76) reflects cross-zip discrimination only — on its native daily panel it achieves AUC 0.87.' +
+      'AUC ~0.69 within the training cities (cross-validated). Applied to a new city like Calvert the honest skill is lower (~0.6), so the tool is best read as a relative indicator rather than an exact probability. Checked against Calvert\'s own VOC air monitors it tracks the area\'s signature pollutant, vinyl chloride, at AUC ~0.71 — evidence the trapping signal is physically real here.' +
       '</p>' +
       '</div>';
   }

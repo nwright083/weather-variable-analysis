@@ -161,36 +161,45 @@ COEFFS_PITTSBURGH_PROXIMITY = {
 # base-rate difference (dropped at deployment, so `const` stays in the Pittsburgh frame).
 # Precipitation carries the same validated city-wide override (raw pooled fit +5.83, overfit).
 #
-# EQUAL-CITY WEIGHTING: Pittsburgh has 44,494 obs vs Louisville's 5,717 (~89% / 11%), so an
-# unweighted pool is dominated ~8:1 by Pittsburgh — barely a "two-city" model. We instead
-# weight each city to equal total influence (freq_weights = 1 for Pittsburgh, n_pgh/n_lou for
-# Louisville). This is a one-line weighting choice, not extra model structure, and it is
-# strictly better: Louisville AUC 0.873 -> 0.903 (near its native ceiling) while Pittsburgh is
-# unharmed (0.906 -> 0.909). The two cities' standardized weather coefficients already agree at
-# r=+0.93 (trapping physics is city-independent), so balancing extracts the shared physical
-# signal rather than Pittsburgh's data volume.
+# EQUAL-CITY WEIGHTING: Pittsburgh has ~9x Louisville's data; each city is weighted to equal
+# total influence so the fit is genuinely two-city, not Pittsburgh-dominated.
 #
-# Behaviour vs the current default: reads a few points LOWER on trapping days (more
-# conservative — desirable for paid ad triggering) and correctly stays near zero on windy and
-# rainy days. wind_speed shrinks toward 0 here, but windy days are still suppressed via the
-# correlated channels (high boundary-layer height, low diurnal range, poor wind alignment), so
-# the model stays physically sensible. NOTE: its absolute probabilities run lower than the
-# Pittsburgh-only proximity model, so the alert threshold must be re-derived before this is
-# used as the ad trigger. Deployed as the "Pooled Transfer + Proximity" mode; a candidate,
-# not yet the default.
+# ===================================================================================
+# HONEST / LEAK-FREE REBUILD (supersedes the earlier version of these coefficients).
+# A pipeline audit found the original training panel aggregated weather over only the hours
+# that had an odor report (median 1 hour/day). That made "diurnal temperature range" the
+# spread across those report-hours — effectively a proxy for the NUMBER of reports, i.e. the
+# outcome. It leaked: report-hour DTR correlated 0.63 with the event (true daily DTR only
+# 0.19); the report-count alone predicted the event at AUC 0.95; removing that one feature
+# collapsed the reported model from 0.90 to 0.64. The old ~0.90 was leakage, not skill, and it
+# also made the live tool run hot (the inflated DTR coefficient, applied to true 24-hour DTR,
+# was ~4-5x too large).
+#
+# These coefficients are refit on leak-free, fully-forecastable features:
+#   * true daily aggregates (24-hour means; true daily diurnal range) — what the live forecast
+#     actually feeds;
+#   * NEAREST-source proximity (max exp(-0.02·d)) in BOTH training and deployment, so the
+#     feature is on one consistent 0-1 scale (this also fixes the Calvert calibration collapse
+#     the summed-3-source training caused);
+#   * same event (weighted burden above its mean, ~23.8% base rate), pooled two-city, equal-weighted.
+# Honest cross-validated skill: AUC ~0.69 (logistic). On a NEW city (cross-city transfer proxy
+# for Calvert) skill is only ~0.6 — this is a relative indicator, not a precision instrument.
+# Validated on Calvert's own VOC monitors it still beats the old model (AUC 0.70 residential),
+# and tracks vinyl chloride — Calvert's signature emission — best (AUC 0.71).
+# F1-optimal alert threshold on this scale: 0.2113 (see model_metrics.json / ad_config).
 COEFFS_POOLED_PROXIMITY = {
-    'const': -15.111598,
-    'temperature': 0.012434,
-    'temperature_squared': -0.000090,
-    'solar_radiation': -0.001313,
-    'relative_humidity': -0.005064,
-    'wind_speed': -0.002932,
-    'precipitation': -0.908541,  # city-wide override (raw pooled fit +5.833; see note above)
-    'diurnal_temperature_range': 0.304080,
-    'boundary_layer_height': -0.000027,
-    'atmospheric_pressure': 0.005226,
-    'multi_source_exposure': 2.518195,
-    'wind_align_weighted': 1.146644,
+    'const': -11.361227,
+    'temperature': 0.064712,
+    'temperature_squared': -0.000431,
+    'solar_radiation': -0.004010,
+    'relative_humidity': -0.024127,
+    'wind_speed': -0.065999,
+    'precipitation': -0.138895,
+    'diurnal_temperature_range': 0.040744,   # true daily DTR (de-leaked; was 0.304 on report-hour DTR)
+    'boundary_layer_height': -0.000040,
+    'atmospheric_pressure': 0.002480,
+    'multi_source_exposure': 8.042405,        # nearest-source 0-1 scale (was 2.52 on summed 0-3 scale)
+    'wind_align_weighted': 0.640750,
 }
 
 # Calvert City Proximity-Enhanced: Calvert terrain-adjusted weather coefficients

@@ -194,32 +194,19 @@ def build_meta():
     # The proximity pair reuses COEFFS_PITTSBURGH_PROXIMITY; the offset is the ONLY
     # difference between an Exact model and its Transfer twin (mode_offset below).
     OFF = core.PRESSURE_ELEVATION_OFFSET
+    # Single deployed model: the honest, leak-free pooled Pittsburgh + Louisville proximity
+    # logistic (true daily DTR, nearest-source, full-day aggregates), evaluated in Calvert's
+    # frame (pressure offset ON). Earlier Pittsburgh-only comparison modes were retired: they
+    # were fit on the pre-audit report-hour panel and are superseded by this rebuild.
     coeffs = {
-        "exact_pittsburgh":               core.COEFFS_PITTSBURGH,
-        "exact_pittsburgh_proximity":     core.COEFFS_PITTSBURGH_PROXIMITY,
-        "pittsburgh_transfer":            core.COEFFS_PITTSBURGH,
-        "pittsburgh_transfer_proximity":  core.COEFFS_PITTSBURGH_PROXIMITY,
-        # 5th model: two-city (Pittsburgh + Louisville) pooled proximity fit, deployed in
-        # Calvert's frame (pressure offset ON). Selectable candidate; not yet the default.
         "pooled_transfer_proximity":      core.COEFFS_POOLED_PROXIMITY,
     }
     mode_labels = {
-        "exact_pittsburgh":               "Exact Pittsburgh",
-        "exact_pittsburgh_proximity":     "Exact Pittsburgh + Proximity",
-        "pittsburgh_transfer":            "Pittsburgh Transfer",
-        "pittsburgh_transfer_proximity":  "Pittsburgh Transfer + Proximity",
-        "pooled_transfer_proximity":      "Pooled PGH+LOU Transfer + Proximity",
+        "pooled_transfer_proximity":      "Odor Risk Model (Pittsburgh + Louisville)",
     }
     mode_offset = {
-        "exact_pittsburgh":               0.0,
-        "exact_pittsburgh_proximity":     0.0,
-        "pittsburgh_transfer":            OFF,
-        "pittsburgh_transfer_proximity":  OFF,
         "pooled_transfer_proximity":      OFF,
     }
-    # Two-city (Pittsburgh + Louisville, equal-weighted) pooled proximity model is the
-    # default: most city-independent trapping physics, validated not-overfit (in-sample vs
-    # 5-fold CV AUC gap < 0.004), and slightly more conservative than the Pittsburgh-only fit.
     default_mode = "pooled_transfer_proximity"
 
     # Expose a locally-fitted Calvert model if analyze_calvert_reports.py installed one.
