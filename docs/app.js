@@ -785,12 +785,23 @@ function renderMethodsTab() {
       '</div>' +
 
       '<div class="formula-block">' +
-      '<div class="formula-step-label">Step 2 &mdash; Odor Risk Index</div>' +
+      '<div class="formula-step-label">Step 2 &mdash; Modeled probability</div>' +
       '<div class="formula-eq">' +
-        'ORI&nbsp;=&nbsp;&sigma;(<span class="fv">z</span>)&nbsp;&times;&nbsp;100%&nbsp;=&nbsp;' +
+        '<span class="fv">P</span>&nbsp;=&nbsp;&sigma;(<span class="fv">z</span>)&nbsp;&times;&nbsp;100%&nbsp;=&nbsp;' +
         '<span class="frac"><span class="frac-n">100%</span><span class="frac-d">1&nbsp;+&nbsp;<span class="fv">e</span><sup>&minus;<span class="fv">z</span></sup></span></span>' +
-        '&ensp;<span style="font-size:0.82rem;color:#64748b;">clamped to [0%, 100%]</span>' +
+        '&ensp;<span style="font-size:0.82rem;color:#64748b;">calibrated probability of a reported odor event, [0%, 100%]</span>' +
       '</div>' +
+      '</div>' +
+
+      '<div class="formula-block">' +
+      '<div class="formula-step-label">Step 3 &mdash; Public Odor Risk Index (0&ndash;100, the displayed number)</div>' +
+      '<div class="formula-eq" style="font-size:0.92rem;">' +
+        'Index&nbsp;=&nbsp;50&thinsp;&middot;&thinsp;(<span class="fv">P</span>&thinsp;/&thinsp;<span class="fv">T</span>)&ensp;if&nbsp;<span class="fv">P</span>&nbsp;&le;&nbsp;<span class="fv">T</span>,&emsp;else&emsp;' +
+        '50&nbsp;+&nbsp;50&thinsp;&middot;&thinsp;(<span class="fv">P</span>&nbsp;&minus;&nbsp;<span class="fv">T</span>)&thinsp;/&thinsp;(3<span class="fv">T</span>)' +
+      '</div>' +
+      '<div class="formula-prox" style="font-weight:400;">A monotonic rescaling of the Step-2 probability that puts each model&rsquo;s alert threshold ' +
+        '<span class="fv">T</span> at index 50 and ~4<span class="fv">T</span> at 100 &mdash; so the public number tracks how notable a day is (like the EPA AQI). ' +
+        'It changes nothing scientific: the probability <span class="fv">P</span> is the real quantity (shown in every tooltip) and the alert decision still uses <span class="fv">P</span>&nbsp;&ge;&nbsp;<span class="fv">T</span>.</div>' +
       '</div>' +
 
       '<p style="font-size:0.84rem;color:#475569;margin:0.8rem 0 0.4rem;"><b>Fitted coefficients (&beta;) by model</b> — positive values increase risk, negative values decrease it. ' +
