@@ -56,8 +56,12 @@ Lossless forwarding; no extra research questions (shorter form → more completi
 2. Smell description (free text, e.g. "rotten eggs, chemical")
 3. Symptoms (free text)
 4. Optional comment
-5. Location: browser geolocation permission prompt (same consent flow as the app);
-   manual street-address entry as fallback if permission is declined
+5. Location: browser geolocation permission prompt (same consent flow as the app),
+   requested in high-accuracy mode — device GPS, never silent IP-based guessing.
+   The form then shows the detected location back to the person (reverse-geocoded
+   address) with an "Is this right?" confirmation; they can correct it by typing a
+   street address. Manual address entry is also the fallback if permission is
+   declined or GPS fails, so a declined prompt never loses a report.
 6. Short privacy note: reports appear on Smell MyCity's public map at approximate
    (perturbed) locations
 
