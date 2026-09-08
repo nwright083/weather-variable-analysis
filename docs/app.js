@@ -10,6 +10,19 @@ function metricFamily(mode) {
   return "exact_pittsburgh";
 }
 
+// Basemap tiles. CARTO's keyless raster tiles began serving an "API KEY REQUIRED" watermark in
+// September 2026, so all maps use Esri's Light Gray Canvas (no key): a base layer plus a labels
+// reference layer. Native tiles stop at zoom 16; Leaflet upscales them beyond that.
+function addBaseTiles(map, maxZoom) {
+  var esri = "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/";
+  var attrib = "Tiles &copy; <a href=\"https://www.esri.com/\">Esri</a> &mdash; Esri, HERE, Garmin, " +
+    "&copy; <a href=\"https://www.openstreetmap.org/copyright\">OpenStreetMap</a> contributors";
+  L.tileLayer(esri + "World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+    {attribution: attrib, maxNativeZoom: 16, maxZoom: maxZoom}).addTo(map);
+  L.tileLayer(esri + "World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}",
+    {maxNativeZoom: 16, maxZoom: maxZoom}).addTo(map);
+}
+
 // Risk-tier legend pills on the normalized 0-100 index (alert line = 50), fixed for every model.
 function tierLegendHtml(firstLabel) {
   return '<span class="badge-pill badge-clear">' + firstLabel + " &lt; 50</span>" +
@@ -287,8 +300,7 @@ async function buildLocSelectMap(tabKey) {
 
   var IND = [37.0486, -88.3480];
   var m = L.map(tabKey + "-loc-map", {zoomControl: false}).setView([37.05, -88.35], 9);
-  L.tileLayer("https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
-    {attribution: "© OpenStreetMap contributors, © CARTO", maxZoom: 19}).addTo(m);
+  addBaseTiles(m, 19);
   L.circleMarker(IND, {radius: 6, color: "#475569", fillColor: "#64748b", fillOpacity: 0.85})
     .bindTooltip("Industrial Complex").addTo(m);
 
@@ -460,8 +472,7 @@ async function ensureMap() {
   if (APP._mapState.map) return;
   var IND = [37.0486, -88.3480];
   var map = L.map("map").setView([IND[0] - 0.05, IND[1]], 10);
-  L.tileLayer("https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
-    {attribution: "© OpenStreetMap contributors, © CARTO", maxZoom: 19}).addTo(map);
+  addBaseTiles(map, 19);
   L.circleMarker(IND, {radius: 9, color: "#475569", fillColor: "#64748b", fillOpacity: 0.9})
     .bindTooltip("Calvert City Industrial Complex (Source)").addTo(map);
   APP._mapState.map = map;
@@ -1239,8 +1250,7 @@ async function buildHourlyTab() {
 
   var IND = [37.0486, -88.3480];
   var m   = L.map("hourly-loc-map", {zoomControl: false}).setView([37.05, -88.35], 9);
-  L.tileLayer("https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
-    {attribution: "© OpenStreetMap contributors, © CARTO", maxZoom: 19}).addTo(m);
+  addBaseTiles(m, 19);
   L.circleMarker(IND, {radius: 6, color: "#475569", fillColor: "#64748b", fillOpacity: 0.85})
     .bindTooltip("Industrial Complex").addTo(m);
 

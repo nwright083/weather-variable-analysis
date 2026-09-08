@@ -29,6 +29,46 @@ import datetime
 import numpy as np
 import pandas as pd
 import requests
+import sys
+import time
+
+# Open-Meteo access with retry. The daily GitHub Actions run on 2026-09-08 fell back to mock data
+# after a single transient failure (20 prior days succeeded; the same request worked locally minutes
+# later). Retry transient errors (connection/timeout, HTTP 429, HTTP 5xx) with exponential backoff
+# before giving up; other 4xx errors are real request problems and are raised immediately.
+OPEN_METEO_ATTEMPTS = 4
+OPEN_METEO_TIMEOUT_S = 40
+OPEN_METEO_BACKOFF_S = 3.0
+
+
+def fetch_open_meteo_json(url, attempts=OPEN_METEO_ATTEMPTS, timeout=OPEN_METEO_TIMEOUT_S):
+    """GET `url` and return parsed JSON, retrying transient failures with exponential backoff."""
+    last_exc = None
+    for attempt in range(1, attempts + 1):
+        try:
+            response = requests.get(url, timeout=timeout)
+            if response.status_code == 429 or response.status_code >= 500:
+                response.raise_for_status()
+            response.raise_for_status()
+            return response.json()
+        except requests.HTTPError as exc:
+            status = getattr(exc.response, "status_code", None)
+            if status is not None and status != 429 and status < 500:
+                raise
+            last_exc = exc
+        except (requests.ConnectionError, requests.Timeout) as exc:
+            last_exc = exc
+        if attempt < attempts:
+            delay = OPEN_METEO_BACKOFF_S * (2 ** (attempt - 1))
+            print(f"[open-meteo] attempt {attempt}/{attempts} failed ({last_exc!r}); retrying in {delay:.0f}s",
+                  file=sys.stderr)
+            time.sleep(delay)
+    raise last_exc
+
+
+def _report_fetch_failure(fn_name, exc):
+    print(f"[open-meteo] {fn_name}: all attempts failed, using mock fallback. Last error: {exc!r}",
+          file=sys.stderr)
 
 # Center coordinates of the Calvert City Industrial Complex
 IND_LAT = 37.0486
@@ -468,9 +508,7 @@ def fetch_forecasts(locations):
     )
 
     try:
-        response = requests.get(url, timeout=12)
-        response.raise_for_status()
-        res_data = response.json()
+        res_data = fetch_open_meteo_json(url)
 
         # Open-Meteo returns a list of dictionaries if multiple coordinates are requested
         forecast_list = res_data if isinstance(res_data, list) else [res_data]
@@ -541,7 +579,8 @@ def fetch_forecasts(locations):
         combined_df = pd.concat(all_daily_records, ignore_index=True)
         return combined_df, False
 
-    except Exception:
+    except Exception as exc:
+        _report_fetch_failure("fetch_forecasts", exc)
         # Build clean simulated fallback dataframe
         dates = [(datetime.date.today() + datetime.timedelta(days=i)).strftime('%Y-%m-%d') for i in range(16)]
         fallback_records = []
@@ -660,9 +699,7 @@ def fetch_hourly_forecasts(locations):
     )
 
     try:
-        response = requests.get(url, timeout=12)
-        response.raise_for_status()
-        res_data = response.json()
+        res_data = fetch_open_meteo_json(url)
         forecast_list = res_data if isinstance(res_data, list) else [res_data]
 
         all_rows = []
@@ -733,7 +770,8 @@ def fetch_hourly_forecasts(locations):
 
         return pd.concat(all_rows, ignore_index=True), False
 
-    except Exception:
+    except Exception as exc:
+        _report_fetch_failure("fetch_hourly_forecasts", exc)
         # Synthetic mock: plausible diurnal cycles per location/day
         today = datetime.date.today()
         all_rows = []
@@ -821,9 +859,7 @@ def fetch_historical_weather(locations):
     )
 
     try:
-        response = requests.get(url, timeout=12)
-        response.raise_for_status()
-        res_data = response.json()
+        res_data = fetch_open_meteo_json(url)
 
         # Open-Meteo returns a list of dictionaries if multiple coordinates are requested
         forecast_list = res_data if isinstance(res_data, list) else [res_data]
@@ -896,7 +932,8 @@ def fetch_historical_weather(locations):
         combined_df = combined_df[combined_df['date'] <= today_str].copy()
         return combined_df, False
 
-    except Exception:
+    except Exception as exc:
+        _report_fetch_failure("fetch_historical_weather", exc)
         today = datetime.date.today()
         # Build clean simulated fallback dataframe
         dates = [(today - datetime.timedelta(days=i)).strftime('%Y-%m-%d') for i in range(1, 31)]
