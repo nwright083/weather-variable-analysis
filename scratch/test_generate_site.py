@@ -51,23 +51,18 @@ def test_build_feature_payload_schema():
 
 
 def test_build_meta_has_coeffs_and_offset():
+    """The honest pooled model is the single deployed engine (f53bf10, 2026-07-28), which
+    retired the pre-audit Pittsburgh comparison modes this test used to check."""
     meta = generate_site.build_meta()
-    assert meta["pressure_offset"] == generate_site.core.PRESSURE_ELEVATION_OFFSET
-    expected = {"exact_pittsburgh", "exact_pittsburgh_proximity",
-                "pittsburgh_transfer", "pittsburgh_transfer_proximity"}
-    assert expected <= set(meta["coeffs"])
-    assert expected <= set(meta["mode_labels"])
-    assert meta["default_mode"] == "pittsburgh_transfer_proximity"
-    # Exact and Transfer twins share coefficient values; the offset is what differs.
-    assert meta["coeffs"]["exact_pittsburgh"]["const"] == generate_site.core.COEFFS_PITTSBURGH["const"]
-    assert meta["coeffs"]["pittsburgh_transfer"]["const"] == generate_site.core.COEFFS_PITTSBURGH["const"]
-    assert meta["coeffs"]["pittsburgh_transfer_proximity"]["multi_source_exposure"] == generate_site.core.COEFFS_PITTSBURGH_PROXIMITY["multi_source_exposure"]
-    # mode_offset gates the pressure transfer: Exact = 0, Transfer = elevation offset.
     OFF = generate_site.core.PRESSURE_ELEVATION_OFFSET
-    assert meta["mode_offset"]["exact_pittsburgh"] == 0.0
-    assert meta["mode_offset"]["exact_pittsburgh_proximity"] == 0.0
-    assert meta["mode_offset"]["pittsburgh_transfer"] == OFF
-    assert meta["mode_offset"]["pittsburgh_transfer_proximity"] == OFF
+    assert meta["pressure_offset"] == OFF
+    assert set(meta["coeffs"]) == {"pooled_transfer_proximity"}
+    assert set(meta["mode_labels"]) == {"pooled_transfer_proximity"}
+    assert meta["default_mode"] == "pooled_transfer_proximity"
+    # The site ships exactly the core's honest pooled coefficients, unmodified.
+    assert meta["coeffs"]["pooled_transfer_proximity"] == generate_site.core.COEFFS_POOLED_PROXIMITY
+    # A transfer model applies the elevation pressure offset.
+    assert meta["mode_offset"]["pooled_transfer_proximity"] == OFF
 
 
 def test_build_meta_model_metrics():
