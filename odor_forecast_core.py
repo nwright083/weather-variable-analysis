@@ -58,6 +58,9 @@ def fetch_open_meteo_json(url, attempts=OPEN_METEO_ATTEMPTS, timeout=OPEN_METEO_
             last_exc = exc
         except (requests.ConnectionError, requests.Timeout) as exc:
             last_exc = exc
+        except requests.exceptions.JSONDecodeError as exc:
+            # HTTP 200 with an empty/non-JSON body is as transient as a 503 (2026-09-29).
+            last_exc = exc
         if attempt < attempts:
             delay = OPEN_METEO_BACKOFF_S * (2 ** (attempt - 1))
             print(f"[open-meteo] attempt {attempt}/{attempts} failed ({last_exc!r}); retrying in {delay:.0f}s",
